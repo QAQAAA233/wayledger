@@ -6,7 +6,7 @@ Wayledger turns one plain-language request ("three of us, Lisbon, four days, $1,
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). All payments run in the **PayPal sandbox**; no real money moves.
 
-- Live demo: `DEMO_URL`
+- Live demo: https://wayledger.lvsyn-tw.workers.dev
 - Demo video: `VIDEO_URL`
 
 ## Why this is different
