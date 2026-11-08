@@ -198,7 +198,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
 
     view(s) {
       const items = s.plan.items.map((i) => ({ ...i, money: itemState(s.ledger, i.id) }));
-      const removed = [...new Set(s.ledger.map((f) => f.itemId))].filter((id) => !s.plan.items.some((i) => i.id === id)).map((id) => ({ id, money: itemState(s.ledger, id) }));
+      const removed = [...new Set(s.ledger.map((f) => f.itemId))].filter((id) => !s.plan.items.some((i) => i.id === id)).map((id) => ({ id, title: Object.values(s.proposals).flatMap((p) => p.actions).find((a) => a.itemId === id)?.title ?? id, money: itemState(s.ledger, id) }));
       const p = s.activeProposal ? s.proposals[s.activeProposal] : null;
       const last = Object.values(s.proposals).filter((x) => ['executed', 'failed'].includes(x.status)).at(-1) ?? null;
       return {

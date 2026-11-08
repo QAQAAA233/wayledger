@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wayledger - group trips where the money follows the plan</title>
+<meta name="description" content="Plan a group trip in plain language. An AI agent builds the itinerary and budget, places PayPal holds, and when the plan changes it works out the money difference - nothing moves until a person confirms.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b6e5f'/%3E%3Cpath d='M7 20c4-9 8 3 12-6 2-4 4-4 6-3' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-grid.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-theme-quartz.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/" aria-label="Wayledger home"><svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M7 20c4-9 8 3 12-6 2-4 4-4 6-3" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/></svg><span>Wayledger</span></a>
+  <span class="tagline">The money follows the plan</span>
+  <span class="badge sandbox" title="All payments run in the PayPal sandbox. No real money moves.">PayPal Sandbox</span>
+</header>
+
+<main id="app" aria-live="polite"></main>
+
+<footer class="foot">Sandbox demo: no real money moves. Open source (MIT) &middot; built with PayPal Orders &amp; Payments APIs, Cloudflare Workers AI and AG Grid.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/dist/ag-grid-community.min.js"></script>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
