@@ -112,3 +112,30 @@ test('whoever has only the link sees the plan and the money, not the documents, 
   const ownRun = (await mine('getRun', [started.v.runId])).v;
   assert.ok(JSON.stringify(ownRun).includes('free cancellation until 6 May'));
 });
+
+// ---- a plan that uses the whole budget leaves the agent no room to work ----------------------------------------------------
+
+test('a plan that uses almost the whole budget is sent back once, and the second answer is accepted whatever it costs', async () => {
+  const full = structuredClone(SAMPLE_PLAN); full.items[0].amount = 800; // $1,100 of $1,200
+  const roomy = structuredClone(SAMPLE_PLAN);                          // $840 of $1,200
+  const asked = [];
+  const twice = { planTrip: async (_p, validate) => { try { asked.push('first'); return validate(structuredClone(full), 0); } catch (e) { asked.push(e.message); return validate(structuredClone(roomy), 1); } } };
+  const ctx = setup(SAMPLE_PLAN, twice);
+  await newTrip(ctx);
+  assert.equal(state(ctx).plan.items[0].amountCents, 54000, 'the roomier answer was used');
+  assert.match(asked[1], /leaves no room for changes.*80%/);
+
+  const stubborn = { planTrip: async (_p, validate) => { try { return validate(structuredClone(full), 0); } catch { return validate(structuredClone(full), 1); } } };
+  const ctx2 = setup(SAMPLE_PLAN, stubborn);
+  await newTrip(ctx2);
+  assert.equal(state(ctx2).plan.items[0].amountCents, 80000, 'asked once, then accepted: a plan is never refused for being full');
+});
+
+test('the planner is told to leave room, and a plan with no stated budget is not judged by it', async () => {
+  const { PLAN_SYSTEM_TEXT } = await import('../src/agent/prompts.js');
+  assert.match(PLAN_SYSTEM_TEXT({ maxItems: 12, categories: ['food'] }), /about 80% of the budget/);
+  const full = structuredClone(SAMPLE_PLAN); full.items[0].amount = 800; full.budget = null; full.budgetQuote = null;
+  const ctx = setup(full, { planTrip: async (_p, validate) => validate(structuredClone(full), 0) });
+  await newTrip(ctx);
+  assert.equal(state(ctx).plan.budgetSource, null);
+});

@@ -18,6 +18,7 @@ Rules:
 - prepaid is true only for lodging and for anything the traveler says must be paid in advance.
 - travelers: use the names the person gave; if none, use "Traveler 1", "Traveler 2" for the stated group size (default 2).
 - participants: names from travelers who share that item (all of them unless the request says otherwise).
+- When the traveler gave a budget, plan for about 80% of the budget: the rest is room for changes later. Never make up an item just to use the rest of it.
 - budget: only a number the traveler wrote. Copy the words they used for it into budgetQuote exactly. If they gave no budget, set budget and budgetQuote to null.
 - Use realistic prices for the destination. Never invent real businesses' booking confirmations.`;
 

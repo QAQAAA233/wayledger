@@ -12,7 +12,7 @@ const OWNER_ONLY = new Set(['confirm', 'createOrder', 'approveOrder', 'retry', '
 const RETURNS_VIEW = new Set(['confirm', 'approveOrder', 'retry', 'refreshProposal', 'rehold', 'closeTrip', 'setBudget', 'addDocument', 'setMandateTerms', 'openDueCheckout']);
 const READS = new Set(['view', 'exists', 'state']);
 // What the agent and the webhook receiver may call on the trip without a person's token.
-const INTERNAL = new Set(['recordPolicy', 'submitEdit', 'noteRun', 'reconcile', 'recordWebhook', 'openDueCheckout']);
+const INTERNAL = new Set(['recordPolicy', 'submitEdit', 'noteRun', 'reconcile', 'recordWebhook', 'openDueCheckout', 'syncHolds']);
 
 const errData = (e) => ({ name: e.constructor.name, message: e.message, code: e.code, debugId: e.debugId, issue: e.issue });
 

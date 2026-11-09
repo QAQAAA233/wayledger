@@ -54,7 +54,7 @@ async function run(env, spend, system, user, schema, validate) {
     try {
       const raw = out?.response ?? out;
       const parsed = typeof raw === 'string' ? JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) : raw;
-      return validate(parsed);
+      return validate(parsed, attempt);
     } catch (e) {
       lastError = String(e.message ?? e).slice(0, 200);
       planRule = e instanceof PlanError ? lastError : '';

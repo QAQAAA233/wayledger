@@ -193,3 +193,35 @@ test('finding 6: a trip with nothing short has nothing to hold', async () => {
   await assert.rejects(ctx.engine.recordWebhook(voidedEvent('NOPE')).then(() => ctx.engine.rehold()), (e) => e.code === 'NOTHING_TO_HOLD');
   assert.equal(ctx.fake.calls.filter((c) => MONEY.test(c)).length, before, 'and nothing was sent to PayPal');
 });
+
+// ---- the schedule notices what no webhook told it ---------------------------------------------------------------------------
+
+test('finding 6: at its scheduled look the trip asks PayPal about its open holds, so a hold voided without any event is found anyway', async () => {
+  const fake = fakePayPalFetch();
+  const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
+  const model = scriptedModel([{ calls: [{ name: 'no_change', args: { note: 'should not be asked' } }] }]);
+  const w = fakeEnv({ ai: planner(), paypal, run: model, sources: fakeSources() });
+  const IP = { 'cf-connecting-ip': '198.51.100.9' };
+  const call = (method, path, body, headers = {}) => handleRequest(new Request(`https://wayledger.test${path}`, { method, headers: { 'content-type': 'application/json', ...IP, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }), w.env, { paypal }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  const made = (await call('POST', '/api/trips', { prompt: PLAN_PROMPT, startDate: SOON })).body;
+  const h = { 'x-owner-token': made.ownerToken };
+  const p = made.proposal;
+  await call('POST', `/api/trips/${made.id}/proposals/${p.id}/confirm`, { digest: p.digest }, h);
+  const order = await call('POST', `/api/trips/${made.id}/proposals/${p.id}/order`, {}, h);
+  await call('POST', `/api/trips/${made.id}/proposals/${p.id}/approve`, { orderId: order.body.orderId }, h);
+  const authId = [...fake.auths.keys()][0];
+
+  // nothing is wrong yet: the look changes nothing
+  await call('POST', `/api/trips/${made.id}/wake`, { demo: false }, h);
+  assert.equal((await call('GET', `/api/trips/${made.id}`, undefined, h)).body.holdLost, null);
+
+  fake.voidOutside(authId); // and no event is ever delivered
+  const woke = await call('POST', `/api/trips/${made.id}/wake`, { demo: false }, h);
+  assert.equal(woke.status, 202);
+  const v = (await call('GET', `/api/trips/${made.id}`, undefined, h)).body;
+  assert.deepEqual(titles(v.holdLost.short), ['Sintra day trip', 'Sunset boat tour']);
+  assert.equal(v.ledger.filter((f) => f.op === 'void' && f.external).length, 1);
+  assert.equal(model.log.length, 0, 'finding out is not a question for a model');
+  await call('POST', `/api/trips/${made.id}/wake`, { demo: false }, h);
+  assert.equal((await call('GET', `/api/trips/${made.id}`, undefined, h)).body.ledger.filter((f) => f.op === 'void').length, 1, 'a second look records nothing twice');
+});

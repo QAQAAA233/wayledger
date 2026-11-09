@@ -114,6 +114,8 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
   async function wake({ simulated = false } = {}) {
     const s = await trip.state();
     if (!s?.plan || s.closedAt) return null;
+    // what PayPal says about the holds comes first, and costs no model: a hold that is gone is a fact, not a question
+    if (!simulated) { try { await trip.mutate('syncHolds'); } catch (e) { console.error('hold check failed', e); } }
     const dates = [...new Set(s.plan.items.map((i) => i.day))].sort((a, b) => a - b).map((d) => [d, dayDate(s.plan.startDate, d)]).filter(([, date]) => date);
     if (simulated) {
       const day = s.plan.items.find((i) => i.category === 'activity')?.day ?? Math.min(2, lastDay(s.plan));

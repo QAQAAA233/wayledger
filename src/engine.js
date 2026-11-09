@@ -333,9 +333,15 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       const s = { id, createdAt: now(), closedAt: null, ownerTokenHash, plan: null, ledger: [], proposals: {}, activeProposal: null, events: [], mandate: null, mandateDraft: null, documents: [], policies: [], webhooks: [], runs: [], holdFrom: null };
       log(s, 'user', prompt);
       try {
-        s.plan = await ai.planTrip(prompt, (raw) => {
+        s.plan = await ai.planTrip(prompt, (raw, attempt = 1) => {
           const budgetSource = budgetFromText(prompt, raw.budget, raw.budgetQuote) ? 'text' : null;
-          return scrub(normalizePlan(raw, null, { budgetSource, startDate }));
+          const plan = scrub(normalizePlan(raw, null, { budgetSource, startDate }));
+          // The agent works in the room a plan leaves inside the budget, and a hold never goes above the budget: a plan that
+          // uses almost all of it is sent back once. The second answer is taken as it is.
+          if (attempt === 0 && budgetSource === 'text' && planTotalCents(plan) > plan.budgetCents * 0.9) {
+            throw new PlanError(`The plan costs $${(planTotalCents(plan) / 100).toFixed(2)} of the $${(plan.budgetCents / 100).toFixed(2)} budget, which leaves no room for changes. Plan for about 80% of the budget.`);
+          }
+          return plan;
         }, { startDate });
       } catch (e) {
         throw asUserError(e);
@@ -470,6 +476,20 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       await proposeClose(s);
       await store.put(s);
       return s;
+    },
+
+    // At its scheduled look the trip asks PayPal about the holds it believes are open. A hold PayPal reports voided (also
+    // when it ran out, and no event ever came) is recorded the same way as one an event announced. No model is asked.
+    async syncHolds() {
+      const s = await load();
+      if (!s || s.closedAt) return { lost: 0 };
+      const open = reserves(s.ledger).filter((r) => r.open);
+      if (open.length === 0) return { lost: 0 };
+      const remote = await paypal.remoteState(s.ledger.filter((f) => f.op === 'authorize' && open.some((r) => r.id === f.id)));
+      let lost = 0;
+      for (const r of open) if (remote[r.id]?.status === 'VOIDED' && noteHoldLost(s, r.id, 'PayPal says it is voided')) lost++;
+      if (lost) await store.put(s);
+      return { lost };
     },
 
     // The items whose hold PayPal cancelled get a new one, which the person approves in PayPal like the first.
