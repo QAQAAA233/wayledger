@@ -68,7 +68,8 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
       const tools = createTools();
       const ctx = {
         runId: r.id, now, sources, seenPlaces: new Map(), simulated: new Map(), simulatedForecast: r.simulatedForecast,
-        userText: `${r.text}\n${s.documents.map((d) => d.text).join('\n')}`,
+        // what the traveler wrote in this run: the only words a name, a price or a share may be taken from
+        travelerText: r.text,
         readState: () => trip.state(),
         simulate: (ops) => trip.simulate(ops),
         recordPolicy: (raw) => trip.mutate('recordPolicy', [raw]),

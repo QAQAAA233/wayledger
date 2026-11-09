@@ -112,8 +112,8 @@ test('the same request outside the limits: the agent stops, nothing moves, and t
 test('a choice that needs a new PayPal hold is never the agent\'s to make, even with room in the limits', async () => {
   const add = (name, amount) => [
     { calls: [T('get_trip')] },
-    { calls: [T('simulate_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }] })] },
-    { calls: [T('submit_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }], summary: 'Added it.', reason: 'You asked.' })] },
+    { calls: [T('simulate_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given' }] })] },
+    { calls: [T('submit_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given' }], summary: 'Added it.', reason: 'You asked.' })] },
   ];
   const wd = await world({ run: scriptedModel(add('Helicopter tour', 300)), terms: TERMS_OK });
   const run = await startRun(wd, 'Please add a Helicopter tour on day 3 for $300.');
@@ -209,11 +209,11 @@ test('names and prices are checked by code before an edit is even simulated', as
   assert.match(await bad({ remove: ['i99'] }, 'an item that does not exist')(), /no item i99/);
   assert.match(await bad({ add: [{ day: 2, placeId: 'wd:Q1262183', category: 'activity', amountBasis: 'same_as_replaced', replaces: 'i3' }] }, 'a price borrowed from an item that is not removed')(), /did not come from search_places|replaces/);
   assert.match(await bad({}, 'an empty edit')(), /empty/);
-  assert.match(await bad({ setTravelers: ['Ana', 'Ben', 'Zed'] }, 'a traveler nobody named')(), /Names are not made up/);
+  assert.match(await bad({ setTravelers: ['Ana', 'Ben', 'Zed'] }, 'a traveler nobody named')(), /must be named by the traveler: Cy, Zed/);
 });
 
 test('a place name or price the person wrote is allowed; a price that matches nothing they wrote is not', async () => {
-  const mk = (amount) => ({ add: [{ day: 3, title: 'Helicopter tour', category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }] });
+  const mk = (amount) => ({ add: [{ day: 3, title: 'Helicopter tour', category: 'activity', amount, amountBasis: 'user_given' }] });
   const m = scriptedModel([{ calls: [T('simulate_edit', mk(250))] }, { calls: [T('simulate_edit', mk(99))] }, { calls: [T('no_change', { note: 'x' })] }]);
   const wd = await world({ run: m, terms: TERMS_OK });
   await startRun(wd, 'Please add the Helicopter tour on day 3, it costs $250.');

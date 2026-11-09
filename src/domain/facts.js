@@ -26,6 +26,19 @@ export function numbersIn(text) {
   return out;
 }
 
+// Amounts of money written in a piece of text, in dollars: "$1,200", "US$90", "USD 40", "90 dollars", "15 usd", "$1.2k".
+// A bare number is not money: "day 2", "12:00", "2026-05-06" and "3 nights" are not prices, so nobody can pass a date
+// or a time off as an amount.
+const MONEY_WORDS = /(?:US\$|USD\s?|\$)\s?(\d[\d,]*(?:\.\d+)?)([kK])?(?![A-Za-z0-9])|(\d[\d,]*(?:\.\d+)?)([kK])?\s?(?:dollars?|usd|bucks)\b/gi;
+export function moneyIn(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(MONEY_WORDS)) {
+    const n = Number((m[1] ?? m[3]).replace(/,/g, ''));
+    if (Number.isFinite(n)) out.push((m[2] ?? m[4]) ? n * 1000 : n);
+  }
+  return out;
+}
+
 // A budget the model says the person gave: believed only if the quote is in the person's words and contains that number.
 export function budgetFromText(userText, budgetDollars, quote) {
   if (budgetDollars == null || !quote || !quoteIn(userText, quote)) return false;
@@ -34,6 +47,14 @@ export function budgetFromText(userText, budgetDollars, quote) {
 
 // A name the model wants on the plan is believed if it came from a tool result this run, or the person wrote it.
 export const textHasName = (text, name) => normalizeText(text).toLowerCase().includes(normalizeText(name).toLowerCase());
+
+// Is this person named in the text? Whole names only: "Ben" is not in "Benfica" and "Dee" is not in "deep".
+export function namesPerson(text, name) {
+  const n = normalizeText(name);
+  if (!n) return false;
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu').test(normalizeText(text));
+}
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
