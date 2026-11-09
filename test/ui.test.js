@@ -432,3 +432,19 @@ test('Flow F: a hold PayPal cancelled shows what has no money behind it, offers 
     await page.waitForSelector('.notice.closed', { timeout: 8000 });
   });
 });
+
+test('the card says what it does ("Hold the money with PayPal"), and the date the limits last is the same day in every time zone', { skip }, async () => {
+  await withApp({}, async (page) => {
+    await page.emulateTimezone('Pacific/Kiritimati'); // UTC+14: the local day is not the UTC day
+    await plan(page);
+    await buttonReady(page);
+    assert.equal(await text(page, '.proposal h2'), 'Hold the money with PayPal');
+    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /Ready to book/);
+    const until = await page.$eval('input[name="until"]', (el) => el.value); // 2026-05-07, the day the form means
+    await payAsBuyer(page);
+    await page.waitForSelector('[data-act="close"]');
+    const [y, m, d] = until.split('-').map(Number);
+    const expected = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    assert.match(await text(page, '.authority'), new RegExp(`Until ${expected}`), 'the form and the line below it name the same day');
+  });
+});
