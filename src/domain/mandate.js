@@ -12,12 +12,15 @@ export const MANDATE_ACTIONS = ['release', 'allocate', 'refund'];
 
 const dollars = (c) => `$${(c / 100).toFixed(2)}`;
 
-export function defaultTerms({ planTotalCents, validUntil }) {
+// The room the agent has for raising the plan is held as a buffer, so it can never be more than the budget leaves above the plan.
+export const raiseRoomCents = (planTotalCents, budgetCents) => (budgetCents == null ? Infinity : Math.max(0, Math.floor((budgetCents - planTotalCents) / 100) * 100));
+
+export function defaultTerms({ planTotalCents, validUntil, budgetCents = null }) {
   const whole = (c) => Math.round(c / 100) * 100;
   return {
     enabled: true,
     refundCapCents: whole(planTotalCents * 0.25),
-    planIncreaseCapCents: whole(planTotalCents * 0.25),
+    planIncreaseCapCents: Math.min(whole(planTotalCents * 0.25), raiseRoomCents(planTotalCents, budgetCents)),
     validUntil,
   };
 }

@@ -88,7 +88,7 @@ export async function handleRequest(request, env, deps = {}) {
     const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
 
     if (parts.length === 3 && request.method === 'GET') return unwrap(await trip.call('view', [], token));
-    if (parts[3] === 'runs' && parts[4] && request.method === 'GET') return unwrap(await trip.call('getRun', [parts[4]]));
+    if (parts[3] === 'runs' && parts[4] && request.method === 'GET') return unwrap(await trip.call('getRun', [parts[4]], token));
     if (parts[3] === 'reconcile') return unwrap(await trip.call('reconcile', []));
     if (request.method !== 'POST') return json({ error: { message: 'Not found' } }, 404);
 

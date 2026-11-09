@@ -99,7 +99,9 @@ test('a budget the model made up or dropped is never believed: nothing is held u
   assert.deepEqual(ctx.fake.calls.filter((c) => MONEY.test(c)), []);
   await assert.rejects(ctx.engine.setBudget(100), (e) => e.code === 'OVER_BUDGET', 'the person\'s own $100 does not fit the plan the model made');
   await ctx.engine.setBudget(1500);
-  await ctx.engine.confirm(p.id, p.digest); // now allowed
+  await assert.rejects(ctx.engine.confirm(p.id, p.digest), (e) => e.code === 'NOT_ACTIVE', 'a budget the person confirmed makes a new proposal with its own digest');
+  const next = active(ctx);
+  await ctx.engine.confirm(next.id, next.digest); // now allowed
 });
 
 test('a budget quote that is not in the person\'s words is not believed either', async () => {

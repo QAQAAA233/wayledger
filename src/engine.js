@@ -2,7 +2,7 @@ import { normalizePlan, applyChange, planTotalCents, perPersonCents, splitChange
 import { diffToActions, checkoutActions, closeActions, shortfalls, BUFFER_ID } from './domain/delta.js';
 import { appendFact, itemState, reserves, ledgerTotals, reconcile, holdLostFacts } from './domain/ledger.js';
 import { createProposal, confirmProposal, confirmByMandate, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
-import { createMandate, evaluateMandate, defaultTerms, normalizeTerms, describeTerms } from './domain/mandate.js';
+import { createMandate, evaluateMandate, defaultTerms, normalizeTerms, describeTerms, raiseRoomCents } from './domain/mandate.js';
 import { describeAction, describeEffect, paypalEffect, proposalSummary } from './domain/describe.js';
 import { validatePolicyFact, operatorLoss, MAX_DOC_CHARS, PolicyError } from './domain/policy.js';
 import { budgetFromText, sharesLongRun } from './domain/facts.js';
@@ -63,7 +63,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     const end = tripEndDate(s.plan);
     return end ? Date.parse(`${end}T23:59:59Z`) + DAY_MS : now() + 14 * DAY_MS;
   };
-  const termsFor = (s) => s.mandateDraft ?? defaultTerms({ planTotalCents: planTotalCents(s.plan), validUntil: lastMoment(s) });
+  const termsFor = (s) => s.mandateDraft ?? defaultTerms({ planTotalCents: planTotalCents(s.plan), validUntil: lastMoment(s), budgetCents: s.plan.budgetCents });
 
   // A hold for every item that is short of money. At the first checkout that is all of them, with the limits offered with
   // it; later it is what a lost hold took with it, with the buffer the signed limits allow.
@@ -241,7 +241,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
 
   // Words from the system prompts must never show up as a trip title: a model can be talked into repeating them.
   // (found live: the real model repeated its chat header and the first words of its prompt, which are shorter than a long run)
-  const LEAK_MARKERS = /cutting knowledge date|today date:|system prompt|you are the (?:planning|trip) agent|reply with json|<\|[a-z_]+\|>/i;
+  const LEAK_MARKERS = /cutting knowledge date|today date:|system prompt|you are the (?:planning|trip) agent|reply with json|<\|[a-z_]+\|>|wayledger/i;
   const isLeak = (s) => typeof s === 'string' && (LEAK_MARKERS.test(s) || (ai?.secrets && sharesLongRun(s, ai.secrets, 16)));
   const scrub = (plan) => {
     if ([plan.destination, ...plan.travelers, ...plan.items.map((i) => i.title)].some(isLeak)) throw new PlanError('The plan repeated the planner\'s own instructions.');
@@ -303,8 +303,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
 
   const publicProposal = (s, p, owner) => {
     if (!p) return null;
+    // a change of who pays what shows what each person would owe afterwards
+    const shares = p.kind === 'change' && p.newPlan && splitChanged(s.plan, p.newPlan)
+      ? (() => { const before = perPersonCents(s.plan); const after = perPersonCents(p.newPlan); return Object.keys({ ...before, ...after }).map((name) => ({ name, before: before[name] ?? 0, after: after[name] ?? 0 })); })()
+      : null;
     return {
       ...p,
+      ...(shares ? { shares } : {}),
       digest: owner ? p.digest : null,
       confirmation: p.confirmation ? { by: p.confirmation.by, at: p.confirmation.at } : null,
       lines: p.actions.map((a) => ({ type: a.type, text: describeAction(a), cents: a.cents })),
@@ -364,6 +369,12 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (planTotalCents(s.plan) > cents) throw new UserFacingError(`The plan already costs $${(planTotalCents(s.plan) / 100).toFixed(2)}, which is over that budget. Change the plan first or pick a larger budget.`, 'OVER_BUDGET');
       s.plan = { ...s.plan, budgetCents: cents, budgetSource: 'user' };
       log(s, 'user', `Confirmed a budget of $${(cents / 100).toFixed(2)}.`);
+      // before the first approval the hold is still being made: a smaller budget leaves less room for changes
+      if (s.ledger.length === 0) {
+        const room = raiseRoomCents(planTotalCents(s.plan), cents);
+        if (s.mandateDraft?.enabled && s.mandateDraft.planIncreaseCapCents > room) s.mandateDraft = { ...s.mandateDraft, planIncreaseCapCents: room };
+        await refreshCheckout(s);
+      }
       await store.put(s);
       return s;
     },
@@ -399,6 +410,10 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (s.ledger.length > 0) throw new UserFacingError('The limits were signed with your first PayPal approval and cannot be changed here.', 'MANDATE_SIGNED');
       let terms;
       try { terms = normalizeTerms(raw, { maxValidUntil: lastMoment(s) + 30 * DAY_MS }); } catch (e) { throw new UserFacingError(e.message, 'BAD_INPUT'); }
+      const room = raiseRoomCents(planTotalCents(s.plan), s.plan.budgetCents);
+      if (terms.enabled && terms.planIncreaseCapCents > room) {
+        throw new UserFacingError(`The raise limit can be at most $${(room / 100).toFixed(2)}: that is what your $${(s.plan.budgetCents / 100).toFixed(2)} budget leaves above the plan.`, 'BAD_INPUT');
+      }
       s.mandateDraft = terms;
       await refreshCheckout(s);
       await store.put(s);
@@ -643,9 +658,10 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         failed: active?.status === 'failed' ? publicProposal(s, active, owner) : null,
         mandate: m ? { terms: m.terms, used: m.used, uses: m.uses, digest: m.digest, text: describeTerms(m.terms), refundLeftCents: Math.max(0, m.terms.refundCapCents - m.used.refundCents), baselineTotalCents: m.baselineTotalCents } : null,
         mandateDraft: s.mandateDraft ?? (active?.mandateTerms ?? null),
-        documents: s.documents,
-        policies: s.policies,
-        webhooks: s.webhooks.slice(-8),
+        // whoever has only the link sees that terms were pasted and read, not what they say, and no PayPal events
+        documents: owner ? s.documents : s.documents.map((d) => ({ id: d.id, chars: d.text.length })),
+        policies: owner ? s.policies : s.policies.map((f) => ({ ...f, quote: null })),
+        webhooks: owner ? s.webhooks.slice(-8) : [],
         runs: s.runs,
         events: s.events,
         holdLost: short.length ? { at: lostAt, short, cents: short.reduce((n, x) => n + x.cents, 0), canRehold: owner } : null,

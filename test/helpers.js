@@ -235,10 +235,10 @@ export function fakeEnv({ ai = planner(), paypal, run = scriptedModel([{ text: '
 }
 
 // Wait until the agent has finished the run (the alarm fires on its own); polls the trip object like the screen does.
-export async function untilRunDone(env, tripId, runId, { timeoutMs = 8000 } = {}) {
+export async function untilRunDone(env, tripId, runId, { timeoutMs = 8000, token = null } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const r = await env.TRIP.get(tripId).call('getRun', [runId]);
+    const r = await env.TRIP.get(tripId).call('getRun', [runId], token);
     if (r.ok && ['done', 'error'].includes(r.v.status)) return r.v;
     if (Date.now() > deadline) throw new Error(`run ${runId} did not finish: ${JSON.stringify(r.v?.status ?? r.e)}`);
     await new Promise((res) => setTimeout(res, 15));

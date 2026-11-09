@@ -8,10 +8,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const usd = (c) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const clock = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 const dateText = (iso) => (iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '');
-const dayDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const dayDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 const STATUS = { planned: 'Planned', held: 'Held', paid: 'Paid', released: 'Released', refunded: 'Refunded', 'part-refunded': 'Part refunded' };
 const OPS = { authorize: 'Trip hold', allocate: 'Set aside', release: 'Freed up', capture: 'Charge', void: 'Hold released', refund: 'Refund' };
 const PAYPAL_OPS = ['authorize', 'capture', 'void', 'refund'];
+const opLabel = (f) => (f.external ? (f.op === 'void' ? 'Hold cancelled by PayPal' : 'Freed: hold cancelled') : OPS[f.op] ?? f.op);
 const isoIn = (days) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 
 const SAMPLE_TRIPS = [
@@ -167,6 +168,17 @@ function refreshProposal() {
   return go();
 }
 
+function rehold() {
+  const go = () => run('Preparing a new hold...', async () => setTrip(await api(`/trips/${S.trip.id}/rehold`, 'POST')), go, 'proposal');
+  return go();
+}
+
+function refreshFailed() {
+  const p = S.trip.failed;
+  const go = () => run('Working out what is left from what really happened...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/refresh`, 'POST')), go);
+  return go();
+}
+
 function retryProposal() {
   const p = S.trip.failed;
   const go = () => run('Retrying the remaining steps...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/retry`, 'POST')), go);
@@ -300,7 +312,7 @@ function budgetBar() {
   const t = S.trip;
   const p = t.plan;
   if (t.closed) return '';
-  if (p.budgetSource) return `<div class="budget ok">Budget <b>${usd(p.budgetCents)}</b> &middot; ${p.budgetSource === 'user' ? 'confirmed by you' : 'from your own words'}${t.owner && !t.ledger.length ? ` <button class="linkbtn" data-act="budget-edit">change</button>` : ''}${S.editBudget ? budgetForm(p) + errorBox('budget') : ''}</div>`;
+  if (p.budgetSource) return `<div class="budget ok">Budget <b>${usd(p.budgetCents)}</b> &middot; ${p.budgetSource === 'user' ? 'confirmed by you' : 'from your own words'}${t.owner ? ` <button class="linkbtn" data-act="budget-edit">change</button>` : ''}${S.editBudget ? budgetForm(p) + errorBox('budget') : ''}</div>`;
   if (!t.owner) return '<div class="budget warn">The traveler has not confirmed a budget yet, so nothing can be held.</div>';
   return `<div class="budget warn"><div><b>Confirm your budget first.</b> Nothing is held until you do. ${p.budgetCents ? `The planner suggested ${usd(p.budgetCents)}, but a budget only counts when it comes from you.` : 'Your message did not state one.'}</div>${budgetForm(p)}${errorBox('budget')}</div>`;
 }
@@ -332,11 +344,12 @@ function proposalCard() {
   const hasHold = p.actions.some((a) => a.type === 'hold');
   const expired = isExpired(p);
   const owner = t.owner;
-  const title = p.kind === 'checkout' ? 'Ready to book' : p.kind === 'close' ? 'Close the trip' : p.outside ? 'A change is waiting for your OK' : 'Review this change';
-  const btnText = p.kind === 'close' ? 'Confirm and close the trip' : p.actions.every((a) => a.type === 'refund') ? `Confirm and refund ${usd(p.mostCanMoveCents)}` : 'Confirm this change';
+  const title = p.kind === 'checkout' ? (t.ledger.length ? 'Hold the money again' : 'Hold the money with PayPal') : p.kind === 'close' ? 'Close the trip' : p.outside?.length ? 'A change is waiting for your OK' : 'Review this change';
+  const btnText = p.kind === 'close' ? 'Confirm and close the trip' : p.actions.length && p.actions.every((a) => a.type === 'refund') ? `Confirm and refund ${usd(p.mostCanMoveCents)}` : 'Confirm this change';
   const unfunded = p.unfunded?.length ? `<div class="notice">Never booked, so there is nothing to settle for: ${p.unfunded.map((u) => `${esc(u.title)} (${usd(u.cents)})`).join(', ')}.</div>` : '';
   const why = p.outside?.length ? `<div class="notice waits"><b>Why the agent did not just do it</b><ul>${p.outside.map((r) => `<li>${esc(r.text)}</li>`).join('')}</ul></div>` : '';
   const loss = p.operatorLoss?.length ? `<div class="notice waits"><b>What this would cost you at the operator</b><ul>${p.operatorLoss.map((l) => `<li>${esc(l.title)}: ${usd(l.lossCents)} (${esc(l.why)})${l.quote ? `<blockquote>&ldquo;${esc(l.quote)}&rdquo; <small>from your terms</small></blockquote>` : ''}</li>`).join('')}</ul></div>` : '';
+  const shares = p.shares ? `<div class="notice"><b>Who pays what after this change</b><ul>${p.shares.map((s) => `<li>${esc(s.name)}: ${usd(s.after)}${s.before === s.after ? '' : ` (now ${usd(s.before)})`}</li>`).join('')}</ul></div>` : '';
   const note = p.agentNote ? `<div class="agentnote"><b>Agent's note (its own words, not checked by the code)</b> ${esc(p.agentNote)}</div>` : '';
   let action;
   if (!owner) action = '<div class="hint">Only the person who planned this trip can confirm it.</div>';
@@ -351,7 +364,7 @@ function proposalCard() {
     <div class="summary">${esc(p.summary)}</div>
     <ul class="acts">${p.lines.map((l) => `<li class="${l.type}"><span>${esc(l.text)}</span></li>`).join('')}</ul>
     <div class="effect">${esc(p.effectText)}</div>
-    ${unfunded}${loss}${why}
+    ${unfunded}${shares}${loss}${why}
     ${note}
     <div class="sumline"><span>Most that can move in PayPal: <b>${usd(p.mostCanMoveCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
     ${p.kind === 'checkout' && owner && !t.ledger.length ? mandateEditor(p) : ''}
@@ -365,7 +378,7 @@ function failedCard() {
   if (!p) return '';
   return `<section class="card" style="border-color:var(--danger)"><h2>One step did not go through</h2><div class="err" style="margin-top:0">${esc(p.error ?? 'PayPal did not finish.')}</div>
     <p style="font-size:.9rem;color:var(--muted)">The steps that succeeded are already in the ledger. The rest has not run. Retrying only repeats what is missing, and nothing else can change until it is done.</p>
-    ${S.trip.owner ? `<button class="btn" data-act="retry-proposal" ${S.busy ? 'disabled' : ''}>Retry the remaining steps</button>` : ''}</section>`;
+    ${S.trip.owner ? `<div class="row"><button class="btn" data-act="retry-proposal" ${S.busy ? 'disabled' : ''}>Retry the remaining steps</button><button class="btn ghost" data-act="refresh-failed" ${S.busy ? 'disabled' : ''}>Work out what is left again</button></div><p class="hint">If PayPal keeps refusing the same step, working it out again checks the ledger and asks for only what is still to do.</p>` : ''}</section>`;
 }
 
 /* ----- the agent's work trail ----- */
@@ -420,8 +433,8 @@ function termsPanel() {
 const ruleText = (p) => (p.nonRefundable ? 'non-refundable' : [p.freeCancelUntil && `free to cancel until ${esc(p.freeCancelUntil)}`, p.penaltyPercent != null && `${p.penaltyPercent}% charged ${p.freeCancelUntil ? 'after that' : 'if cancelled'}`].filter(Boolean).join(', '));
 function termsList() {
   const t = S.trip;
-  const docs = t.documents.map((d) => `<div class="doc">${esc(d.text.length > 160 ? d.text.slice(0, 158) + '...' : d.text)}</div>`).join('');
-  const rules = t.policies.filter((p) => !p.none).map((p) => `<blockquote>&ldquo;${esc(p.quote)}&rdquo; <small>${esc(p.itemTitle)}: ${ruleText(p)}</small></blockquote>`).join('');
+  const docs = t.documents.map((d) => `<div class="doc">${d.text == null ? `Booking terms were pasted (${d.chars} characters). Only the person who planned the trip can read them.` : esc(d.text.length > 160 ? d.text.slice(0, 158) + '...' : d.text)}</div>`).join('');
+  const rules = t.policies.filter((p) => !p.none).map((p) => (p.quote == null ? `<div class="doc">${esc(p.itemTitle)}: ${ruleText(p)}</div>` : `<blockquote>&ldquo;${esc(p.quote)}&rdquo; <small>${esc(p.itemTitle)}: ${ruleText(p)}</small></blockquote>`)).join('');
   const silent = t.policies.filter((p) => p.none).map((p) => esc(p.itemTitle));
   return `${docs}${rules ? `<div class="rules"><b>Rules the agent found in your terms</b>${rules}</div>` : ''}${silent.length ? `<div class="hint">Your terms do not mention: ${silent.join(', ')}.</div>` : ''}`;
 }
@@ -474,7 +487,16 @@ function summaryList() {
       .map((r) => `<li><span>${esc(r.item)}</span><b>${usd(r.total)}</b><small>${STATUS[r.status] ?? r.status}${r.held ? ` &middot; ${usd(r.held)} held` : ''}${r.paid ? ` &middot; ${usd(r.paid)} paid` : ''}</small></li>`).join('')}</ul>`;
   }
   const wanted = (f) => (S.tab === 'paypal') === PAYPAL_OPS.includes(f.op);
-  return `<ul class="sumlist">${[...t.ledger].filter(wanted).reverse().map((f) => `<li><span>${esc(OPS[f.op] ?? f.op)}: ${esc(title(f.itemId))}</span><b>${usd(f.cents)}</b><small>${esc(f.status)} &middot; ${esc(clock.format(new Date(f.at)))}</small></li>`).join('') || '<li><span>Nothing yet</span></li>'}</ul>`;
+  return `<ul class="sumlist">${[...t.ledger].filter(wanted).reverse().map((f) => `<li><span>${esc(opLabel(f))}: ${esc(title(f.itemId))}</span><b>${usd(f.cents)}</b><small>${esc(f.status)} &middot; ${esc(clock.format(new Date(f.at)))}</small></li>`).join('') || '<li><span>Nothing yet</span></li>'}</ul>`;
+}
+
+function holdLostBanner() {
+  const h = S.trip.holdLost;
+  if (!h) return '';
+  const list = h.short.map((x) => `${esc(x.title)} (${usd(x.cents)})`).join(', ');
+  const showButton = h.canRehold && S.trip.proposal?.kind !== 'checkout';
+  return `<div class="notice lost" id="hold-lost" role="alert"><b>PayPal no longer holds part of this trip's money.</b> The hold was cancelled outside Wayledger or ran out, so nothing is set aside for ${list}: ${usd(h.cents)} in all. ${h.canRehold ? 'Place a new hold to put that money back, or close the trip.' : 'Only the person who planned the trip can place a new hold.'}
+    ${showButton ? `<div class="row"><button class="btn small" data-act="rehold" ${S.busy ? 'disabled' : ''}>Place a new hold</button></div>` : ''}</div>`;
 }
 
 function tripView() {
@@ -491,7 +513,7 @@ function tripView() {
   const itin = `<section class="card" id="itinerary-card"><h2>Itinerary</h2>${itinerary()}<h2 style="margin-top:14px">Shares</h2><div class="per">${per}</div></section>`;
   const failed = failedCard();
   return `<div class="tripbar"><div><h1>${esc(t.plan.title)}</h1><div class="sub">${esc(t.plan.destination)}${dates} &middot; ${esc(t.plan.travelers.join(', '))}</div></div><div class="row">${showClose ? `<button class="btn small" data-act="close" ${S.busy ? 'disabled' : ''}>Close trip</button>` : ''}<button class="btn ghost small" data-act="new">New trip</button></div></div>
-  ${viewOnly}${closedNote}${deferred}${budgetBar()}
+  ${viewOnly}${closedNote}${deferred}${holdLostBanner()}${budgetBar()}
   <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold${unusedHold}</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Paid</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
   <div class="layout">
     ${narrow() ? `<div class="col">${agent}${proposal}${failed}${itin}${ledgerCard()}</div>` : `<div class="col">${itin}${ledgerCard()}</div><div class="col">${proposal}${failed}${agent}</div>`}
@@ -524,7 +546,7 @@ function mountGrid() {
   }
   const title = (id) => (id === '_reserve' ? 'Whole trip' : t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id);
   const wanted = (f) => (S.tab === 'paypal') === PAYPAL_OPS.includes(f.op);
-  const rows = [...t.ledger].filter(wanted).reverse().map((f) => ({ at: clock.format(new Date(f.at)), op: OPS[f.op] ?? f.op, item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
+  const rows = [...t.ledger].filter(wanted).reverse().map((f) => ({ at: clock.format(new Date(f.at)), op: opLabel(f), item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
   const columnDefs = S.tab === 'paypal'
     ? [
       { field: 'op', headerName: 'Action', flex: 1.2, minWidth: 104 },
@@ -597,6 +619,8 @@ $app.addEventListener('click', (e) => {
   else if (a === 'confirm') confirmRelease();
   else if (a === 'refresh') refreshProposal();
   else if (a === 'retry-proposal') retryProposal();
+  else if (a === 'refresh-failed') refreshFailed();
+  else if (a === 'rehold') rehold();
   else if (a === 'retry-error') S.error?.retryFn?.();
   else if (a === 'verify') verify();
   else if (a === 'budget-save') saveBudget();
@@ -624,6 +648,16 @@ async function resumeRun() {
   try { S.run = await api(`/trips/${S.trip.id}/runs/${latest.id}`); updateTrail(); if (['queued', 'running'].includes(S.run.status)) watchRun(latest.id); } catch { /* the trail just stays empty */ }
 }
 window.addEventListener('hashchange', route);
+
+// A hold can be cancelled at PayPal while the page is open. Now and then, when nothing is being done, the page looks again
+// and redraws only if the trip changed (a PayPal window or a typed draft is never in the way).
+const seen = (t) => JSON.stringify([t.ledger.length, t.webhooks.map((w) => w.id), t.holdLost, t.proposal?.id, t.failed?.id, t.closed, t.runs.at(-1)?.status]);
+setInterval(async () => {
+  const t = S.trip;
+  if (!t || S.busy || document.visibilityState !== 'visible' || S.polling || t.closed || !t.ledger.length) return;
+  if (t.proposal?.actions.some((a) => a.type === 'hold') || document.activeElement?.matches?.('input, textarea')) return;
+  try { const next = await api(`/trips/${t.id}`); if (S.trip?.id === t.id && !S.busy && seen(next) !== seen(S.trip)) setTrip(next); } catch { /* the next look will do */ }
+}, 20_000);
 
 (async function boot() {
   S.judge = readJudgeCode();

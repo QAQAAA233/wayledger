@@ -124,6 +124,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .notice.waits { background: var(--held-bg); color: var(--held); }
 .notice.waits ul { margin: 4px 0 0; padding-left: 18px; }
 .notice.viewonly { margin: 0 0 12px; }
+.notice.lost { margin: 0 0 14px; background: var(--danger-bg); color: var(--danger); }
 .agentnote { margin: 10px 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: .92rem; }
 .agentnote b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .effect { font-size: .92rem; padding: 8px 10px; background: var(--accent-soft); border-radius: 8px; margin: 8px 0; }

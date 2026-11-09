@@ -17,6 +17,9 @@ const KINDS = {
 };
 
 const HOUR = 3_600_000;
+// A label in a public database can say anything. A place the model may add to a trip has a name: short, no markup, no
+// line breaks, not a sentence.
+export const plausibleName = (n) => typeof n === 'string' && n.length >= 2 && n.length <= 70 && !/[<>{}[\]`|\\\n\r\t]/.test(n) && !/[.!?]\s/.test(n) && n.trim().split(/\s+/).length <= 9;
 const jsonFetch = async (fetchImpl, url, init = {}, timeoutMs = 9000) => {
   const res = await fetchImpl(url, { ...init, headers: { 'user-agent': UA, accept: 'application/json', ...(init.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`${new URL(url).hostname} answered ${res.status}`);
@@ -67,7 +70,7 @@ export function createSources({ fetchImpl = fetch, cache = null, toolkit = null,
           return j.results.bindings.map((b) => ({ id: b.item.value.split('/').pop(), name: b.itemLabel.value, description: b.itemDescription?.value ?? null }));
         });
         const seen = new Set();
-        const places = rows.filter((r) => !/^Q\d+$/.test(r.name) && !seen.has(r.name) && seen.add(r.name)).slice(0, 12)
+        const places = rows.filter((r) => !/^Q\d+$/.test(r.name) && plausibleName(r.name) && !seen.has(r.name) && seen.add(r.name)).slice(0, 12)
           .map((r) => ({ placeId: `wd:${r.id}`, name: r.name, kind, indoor: cls[1], description: r.description }));
         if (!places.length) return { available: true, places: [], note: `No ${kind.replace('_', ' ')} places were found near ${g.name}.`, source: 'Wikidata' };
         return { available: true, places, source: 'Wikidata', note: 'Real places. Ticket prices and opening hours are not included.' };

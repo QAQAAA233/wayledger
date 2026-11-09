@@ -36,7 +36,7 @@ async function world({ run, sources = fakeSources({ forecasts: STORM, places: PL
 const startRun = async (wd, text = 'A storm is forecast for the boat tour day. Swap it for something indoors.') => {
   const r = await wd.call('startRun', [text]);
   assert.ok(r.ok, JSON.stringify(r));
-  return untilRunDone(wd.w.env, wd.id, r.v.runId);
+  return untilRunDone(wd.w.env, wd.id, r.v.runId, { token: wd.token });
 };
 const moneyCalls = (wd) => wd.fake.calls.filter((c) => /POST .*\/(orders|authorize|capture|void|refund)/.test(c));
 const titles = (run) => run.events.filter((e) => e.title).map((e) => e.title);

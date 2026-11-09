@@ -396,3 +396,39 @@ test('cancelling something the terms make non-refundable waits for the person, a
     await noJargon(page, 'the card that waits for the person');
   });
 });
+
+test('Flow F: a hold PayPal cancelled shows what has no money behind it, offers a new hold, and closing is never stuck', { skip }, async () => {
+  await withApp({}, async (page, app) => {
+    await booked(page);
+    const authId = [...app.fake.auths.keys()][0];
+    app.fake.voidOutside(authId);
+
+    // the person closes the trip; PayPal refuses the charge because the hold is gone
+    await page.click('[data-act="close"]');
+    await page.waitForSelector('[data-act="confirm"]');
+    await page.click('[data-act="confirm"]');
+    await page.waitForSelector('#hold-lost', { timeout: 8000 });
+    const banner = await text(page, '#hold-lost');
+    assert.match(banner, /PayPal no longer holds part of this trip's money/);
+    assert.match(banner, /Sintra day trip \(\$120\.00\)/);
+    assert.equal(await page.$('.failed, [data-act="retry-proposal"]'), null, 'nothing is left half-done to retry');
+    assert.notEqual(await page.$('[data-act="close"]'), null, 'and the trip can still be closed');
+    await noJargon(page, 'the lost-hold banner');
+
+    // a new hold for exactly that money, approved in PayPal like the first one
+    await page.click('[data-act="rehold"]');
+    await page.waitForFunction(() => /Hold the money again/.test(document.querySelector('.proposal h2')?.innerText ?? ''), { timeout: 5000 });
+    assert.match(await text(page, '.proposal'), /Sintra day trip/);
+    await buttonReady(page);
+    await payAsBuyer(page);
+    await page.waitForFunction(() => !document.getElementById('hold-lost') && !document.querySelector('.proposal'), { timeout: 8000 });
+    await page.click('[data-act="verify"]');
+    await page.waitForSelector('.verify .ok', { timeout: 5000 });
+
+    // and closing now charges the new hold and ends the trip
+    await page.click('[data-act="close"]');
+    await page.waitForSelector('[data-act="confirm"]');
+    await page.click('[data-act="confirm"]');
+    await page.waitForSelector('.notice.closed', { timeout: 8000 });
+  });
+});

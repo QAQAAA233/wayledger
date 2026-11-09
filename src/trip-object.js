@@ -46,7 +46,13 @@ export function createTripObject({ storage: raw, env, deps = {} }) {
       const r = await agent.getRun(args[0]);
       if (!r) throw new UserFacingError('Run not found.', 'NOT_FOUND');
       const { simulatedForecast, ...rest } = r;
-      return rest;
+      if (await runner.isOwner(token)) return rest;
+      // the trail shows what the agent did; the traveler's own words and the sentences quoted from their documents stay with them
+      return {
+        ...rest,
+        text: rest.text ? 'A message from the traveler.' : rest.text,
+        events: rest.events.map(({ quote, ...e }) => (e.kind === 'wake' && rest.trigger === 'message' ? { ...e, detail: 'A message from the traveler.' } : e)),
+      };
     });
     if (method === 'webhook') {
       return wrap(async () => {
