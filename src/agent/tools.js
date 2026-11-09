@@ -150,11 +150,11 @@ export function createTools() {
         trip: { title: s.plan.title, destination: s.plan.destination, startDate: s.plan.startDate, endDate: tripEndDate(s.plan), travelers: s.plan.travelers, budgetUsd: usd(s.plan.budgetCents), budgetConfirmedByTraveler: Boolean(s.plan.budgetSource) },
         items: s.plan.items.map((i) => { const st = itemState(s.ledger, i.id); return { id: i.id, day: i.day, date: dayDate(s.plan.startDate, i.day), title: i.title, category: i.category, priceUsd: usd(i.amountCents), paidInAdvance: i.prepaid, heldUsd: usd(st.heldCents), chargedUsd: usd(st.paidCents), sharedBy: i.participants }; }),
         planTotalUsd: usd(total),
-        limits: live ? { refundLeftUsd: usd(Math.max(0, m.terms.refundCapCents - m.used.refundCents)), planIncreaseLeftUsd: usd(m.terms.planIncreaseCapCents - Math.max(0, total - m.baselineTotalCents)), validUntil: new Date(m.terms.validUntil).toISOString().slice(0, 10) } : null,
+        limits: live ? { refundLeftUsd: usd(Math.max(0, m.terms.refundCapCents - Math.max(m.used.refundCents, m.used.cancelledCents ?? 0))), planIncreaseLeftUsd: usd(m.terms.planIncreaseCapCents - Math.max(0, total - m.baselineTotalCents)), validUntil: new Date(m.terms.validUntil).toISOString().slice(0, 10) } : null,
         termsRecorded: s.policies.map((p) => ({ itemId: p.itemId, item: p.itemTitle, quote: p.quote ?? null, none: Boolean(p.none) })),
         bookingTerms: s.documents.length ? { pasted: s.documents.length, note: 'The traveler pasted booking terms. Before you cancel or lower any item, call read_documents and record what the terms say about that item with record_policy.' } : null,
       };
-      const lim = result.limits ? `you may refund up to $${result.limits.refundLeftUsd.toFixed(2)} and raise the plan by up to $${result.limits.planIncreaseLeftUsd.toFixed(2)}` : 'no limits are signed, so every change waits for the traveler';
+      const lim = result.limits ? `you may cancel or refund up to $${result.limits.refundLeftUsd.toFixed(2)} and raise the plan by up to $${result.limits.planIncreaseLeftUsd.toFixed(2)}` : 'no limits are signed, so every change waits for the traveler';
       return { result, event: { title: 'Looked at your trip', detail: `${s.plan.items.length} items, plan total ${money(total)}; ${lim}.` } };
     },
   });

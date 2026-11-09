@@ -176,3 +176,36 @@ test('before the first approval nothing is signed, so the person\'s own words ch
   assert.deepEqual(state(ctx).plan.travelers, [...ALL, 'Dee']);
   assert.ok(active(ctx).actions.length > 0, 'the checkout is ready again');
 });
+
+// ---- finding 2, the rest: the agent cannot take the whole plan apart on its own -------------------------------------------
+
+test('finding 2: what the agent may cancel on its own is limited by the same signed limit as refunds, over the life of the limits', async () => {
+  const ctx = setup();
+  await booked(ctx, LIMITS(ctx, { refundCapCents: 21000 }));
+  const sintra = itemId(ctx, 'Sintra'); const boat = itemId(ctx, 'boat');
+  const both = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: boat }, { op: 'remove', itemId: sintra }] });
+  assert.equal(both.outcome, 'proposed', 'two held bookings worth $300 at once, with $210 allowed');
+  assert.deepEqual(both.mandate.reasons.map((r) => r.code), ['CANCEL_OVER_LIMIT']);
+  assert.match(both.mandate.reasons[0].text, /takes \$300\.00 of bookings out of the plan.*only \$210\.00 of your \$210\.00 limit/);
+  assert.equal(state(ctx).plan.items.length, 3, 'nothing was taken out');
+
+  const one = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: boat }] });
+  assert.equal(one.outcome, 'executed');
+  assert.equal(state(ctx).mandate.used.cancelledCents, 18000);
+  const next = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: sintra }] });
+  assert.equal(next.outcome, 'proposed', 'the allowance is for the life of the limits, not for each request');
+  assert.match(next.mandate.reasons[0].text, /only \$30\.00 of your \$210\.00 limit/);
+  // a person\'s yes is a person\'s yes: it does not use the agent\'s allowance
+  const p = active(ctx);
+  await ctx.engine.confirm(p.id, p.digest);
+  assert.equal(state(ctx).mandate.used.cancelledCents, 18000);
+  assert.equal(state(ctx).plan.items.some((i) => i.id === sintra), false);
+});
+
+test('finding 2: lowering a price is not cancelling, so good news from an operator never uses up the allowance', async () => {
+  const ctx = setup();
+  await booked(ctx, LIMITS(ctx, { refundCapCents: 21000 }));
+  const out = await ctx.engine.submitEdit({ ops: [{ op: 'reprice', itemId: itemId(ctx, 'Sintra'), amount: 60 }] });
+  assert.equal(out.outcome, 'executed');
+  assert.equal(state(ctx).mandate.used.cancelledCents, 0);
+});

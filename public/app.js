@@ -328,7 +328,7 @@ function mandateEditor(p) {
   return `<form class="mandate" id="mandate-form">
     <label class="check"><input type="checkbox" name="enabled" ${d.enabled ? 'checked' : ''}> <b>Let the agent make changes on its own, inside these limits</b></label>
     <div class="row">
-      <label class="date">Refund up to $ <input type="number" name="refund" min="0" step="1" value="${esc(d.refund)}"></label>
+      <label class="date">Cancel or refund up to $ <input type="number" name="refund" min="0" step="1" value="${esc(d.refund)}"></label>
       <label class="date">Raise the plan by up to $ <input type="number" name="raise" min="0" step="1" value="${esc(d.raise)}"></label>
       <label class="date">Until <input type="date" name="until" value="${esc(d.until)}"></label>
       <button class="btn small ghost" type="button" data-act="mandate-save" ${S.busy ? 'disabled' : ''}>Update limits</button>
@@ -416,7 +416,7 @@ function updateTrail() {
 function authorityLine() {
   const t = S.trip;
   const m = t.mandate;
-  if (m) return `<div class="authority ok"><b>Acting within your limits.</b> ${m.terms.enabled ? `Refunds: ${usd(m.refundLeftCents)} left of ${usd(m.terms.refundCapCents)}. Plan raise: up to ${usd(m.terms.planIncreaseCapCents)}. Until ${esc(dayDate(m.terms.validUntil))}.` : 'None given.'}</div>`;
+  if (m) return `<div class="authority ok"><b>Acting within your limits.</b> ${m.terms.enabled ? `Cancel or refund: ${usd(m.refundLeftCents)} left of ${usd(m.terms.refundCapCents)}. Plan raise: up to ${usd(m.terms.planIncreaseCapCents)}. Until ${esc(dayDate(m.terms.validUntil))}.` : 'None given.'}</div>`;
   if (t.ledger.length) return '<div class="authority">You signed no limits, so every change waits for your OK.</div>';
   return '<div class="authority">The agent starts acting on its own after you sign limits with your first PayPal approval. Until then it only proposes.</div>';
 }

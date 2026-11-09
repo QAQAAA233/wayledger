@@ -5,7 +5,7 @@ import { chargesNow } from './delta.js';
 // plan and move money on its own. Everything here is decided by code from numbers; the model can read the limits and
 // can ask for a change, but nothing the model writes ever decides whether a change is inside them.
 //
-//   refundCapCents       the most the agent may refund in total
+//   refundCapCents       the most the agent may cancel or refund in total (bookings it takes out of the plan, and money it gives back)
 //   planIncreaseCapCents the most the agent may raise the plan's total above where it stood when the limits were signed
 //   validUntil           epoch ms; after that every change waits for the person
 export const MANDATE_ACTIONS = ['release', 'allocate', 'refund'];
@@ -45,7 +45,7 @@ export function normalizeTerms(raw, { maxValidUntil } = {}) {
 export const mandateDigest = (m) => sha256Hex(JSON.stringify({ trip: m.tripId, terms: m.terms, baseline: m.baselineTotalCents, proposal: m.proposalId }));
 
 export async function createMandate({ tripId, terms, baselineTotalCents, proposalId, now }) {
-  const m = { id: `m${now.toString(36)}`, tripId, terms, baselineTotalCents, proposalId, createdAt: now, used: { refundCents: 0 }, uses: [] };
+  const m = { id: `m${now.toString(36)}`, tripId, terms, baselineTotalCents, proposalId, createdAt: now, used: { refundCents: 0, cancelledCents: 0 }, uses: [] };
   m.digest = await mandateDigest(m);
   return m;
 }
@@ -57,7 +57,7 @@ export async function mandateIntact(m) {
 // Is this change inside the signed limits? `facts` come from the engine, never from the model:
 //   actions, humanOnly (the change touches the budget), planAfterTotalCents, now, operatorLossCents (what the terms say the
 //   operator would keep)
-export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now, operatorLossCents = 0, splitChanged = false }) {
+export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now, operatorLossCents = 0, splitChanged = false, cancelledCents = 0 }) {
   const reasons = [];
   const refundCents = actions.filter((a) => a.type === 'refund').reduce((s, a) => s + a.cents, 0);
   const planIncreaseCents = mandate ? planAfterTotalCents - mandate.baselineTotalCents : 0;
@@ -72,6 +72,11 @@ export function evaluateMandate(mandate, { actions, humanOnly = false, planAfter
     if (mandate.used.refundCents + refundCents > mandate.terms.refundCapCents) {
       reasons.push({ code: 'REFUND_OVER_LIMIT', text: `This refunds ${dollars(refundCents)}, but only ${dollars(remaining.refundCents)} of your ${dollars(mandate.terms.refundCapCents)} refund limit is left.` });
     }
+    // Bookings taken out of the plan count against the same limit, held or paid: the agent cannot take a trip apart on its own.
+    const cancelLeft = Math.max(0, mandate.terms.refundCapCents - (mandate.used.cancelledCents ?? 0));
+    if (cancelledCents > cancelLeft && !reasons.some((r) => r.code === 'REFUND_OVER_LIMIT')) {
+      reasons.push({ code: 'CANCEL_OVER_LIMIT', text: `This takes ${dollars(cancelledCents)} of bookings out of the plan, but only ${dollars(cancelLeft)} of your ${dollars(mandate.terms.refundCapCents)} limit for cancelling and refunding is left.` });
+    }
     if (planIncreaseCents > mandate.terms.planIncreaseCapCents) {
       reasons.push({ code: 'PLAN_INCREASE_OVER_LIMIT', text: `This raises the plan by ${dollars(planIncreaseCents)}, over your ${dollars(mandate.terms.planIncreaseCapCents)} limit.` });
     }
@@ -85,10 +90,10 @@ export function evaluateMandate(mandate, { actions, humanOnly = false, planAfter
   if (splitChanged) reasons.push({ code: 'SPLIT_IS_YOURS', text: 'This changes who is on the trip or who shares an item, so it needs your OK.' });
   if (humanOnly) reasons.push({ code: 'BUDGET_IS_YOURS', text: 'Only you can change your budget.' });
   if (operatorLossCents > 0) reasons.push({ code: 'LOSS_TO_OPERATOR', text: `By your terms this would cost you ${dollars(operatorLossCents)} that the operator keeps, so it needs your OK.` });
-  return { within: reasons.length === 0, reasons, refundCents, planIncreaseCents, remaining };
+  return { within: reasons.length === 0, reasons, refundCents, cancelledCents, planIncreaseCents, remaining };
 }
 
 export function describeTerms(terms) {
   if (!terms?.enabled) return 'The agent may not act on its own. Every change waits for your OK.';
-  return `The agent may refund up to ${dollars(terms.refundCapCents)} in total and raise the plan by up to ${dollars(terms.planIncreaseCapCents)}, until ${new Date(terms.validUntil).toISOString().slice(0, 10)}. Anything beyond that waits for you.`;
+  return `The agent may cancel or refund up to ${dollars(terms.refundCapCents)} in total and raise the plan by up to ${dollars(terms.planIncreaseCapCents)}, until ${new Date(terms.validUntil).toISOString().slice(0, 10)}. Anything beyond that waits for you.`;
 }

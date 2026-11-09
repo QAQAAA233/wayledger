@@ -21,6 +21,7 @@ const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 export function upgradeState(s) {
   if (!s) return s;
   s.documents ??= []; s.policies ??= []; s.webhooks ??= []; s.runs ??= []; s.mandate ??= null; s.mandateDraft ??= null; s.holdFrom ??= null; s.ownerTokenHash ??= null;
+  if (s.mandate) s.mandate.used.cancelledCents ??= 0;
   return s;
 }
 const DAY_MS = 86_400_000;
@@ -271,7 +272,8 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     }
     const operatorLossCents = losses.reduce((n, l) => n + (l.lossCents ?? 0), 0);
     const split = splitChanged(s.plan, newPlan);
-    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now(), operatorLossCents, splitChanged: split });
+    const cancelledCents = s.plan.items.filter((i) => !newById.has(i.id)).reduce((n, i) => n + i.amountCents, 0);
+    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now(), operatorLossCents, splitChanged: split, cancelledCents });
     const effect = paypalEffect(actions);
     const holds = reserves(s.ledger).filter((r) => r.open);
     const expiring = holds.filter((r) => r.expiresAt).map((r) => r.expiresAt).sort()[0] ?? null;
@@ -447,6 +449,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
       if (sim.mandate.within) {
         await confirmByMandate(p, s.mandate, sim.mandate, now());
+        s.mandate.used.cancelledCents += sim.mandate.cancelledCents;
         log(s, 'system', `Inside the limits you signed, so the agent went ahead: ${summary}`);
         await execute(s, p);
         await store.put(s);
@@ -656,7 +659,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         ledger: s.ledger,
         proposal: active && active.status !== 'failed' ? publicProposal(s, active, owner) : null,
         failed: active?.status === 'failed' ? publicProposal(s, active, owner) : null,
-        mandate: m ? { terms: m.terms, used: m.used, uses: m.uses, digest: m.digest, text: describeTerms(m.terms), refundLeftCents: Math.max(0, m.terms.refundCapCents - m.used.refundCents), baselineTotalCents: m.baselineTotalCents } : null,
+        mandate: m ? { terms: m.terms, used: m.used, uses: m.uses, digest: m.digest, text: describeTerms(m.terms), refundLeftCents: Math.max(0, m.terms.refundCapCents - Math.max(m.used.refundCents, m.used.cancelledCents ?? 0)), baselineTotalCents: m.baselineTotalCents } : null,
         mandateDraft: s.mandateDraft ?? (active?.mandateTerms ?? null),
         // whoever has only the link sees that terms were pasted and read, not what they say, and no PayPal events
         documents: owner ? s.documents : s.documents.map((d) => ({ id: d.id, chars: d.text.length })),

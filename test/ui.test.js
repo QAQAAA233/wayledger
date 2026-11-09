@@ -79,7 +79,7 @@ test('Flow A: the agent wakes, reads the terms, quotes the sentence, finds a rea
   const holder = {};
   await withApp({ model: (id, input) => holder.run(id, input) }, async (page, app) => {
     await booked(page);
-    assert.match(await text(page, '.authority'), /Acting within your limits.*Refunds: \$210\.00 left of \$210\.00/);
+    assert.match(await text(page, '.authority'), /Acting within your limits.*Cancel or refund: \$210\.00 left of \$210\.00/);
     const line = await pasteTermsAndTeachModel(page, holder);
     const quote = line.replace(/, after that.*$/, '');
     const refundsBefore = app.fake.refs.size;
@@ -105,7 +105,7 @@ test('Flow A: the agent wakes, reads the terms, quotes the sentence, finds a rea
     assert.match(itinerary, /Electricity Museum[\s\S]*real place/);
     assert.match(itinerary, /Budget set aside at the price of what it replaces/, 'a price that was not looked up says so');
     assert.equal(app.fake.refs.size, refundsBefore + 1, 'one real PayPal refund');
-    assert.match(await text(page, '.authority'), /Refunds: \$30\.00 left of \$210\.00/);
+    assert.match(await text(page, '.authority'), /Cancel or refund: \$30\.00 left of \$210\.00/);
     assert.match(trail, /Agent's note to you: I swapped the boat tour for a museum visit because of the storm./, 'its own words are shown, labelled as its words');
 
     await page.click('[data-act="verify"]');
@@ -142,7 +142,7 @@ test('Flow B: the same request outside the limits stops, moves nothing and shows
     await page.click('button[data-act="confirm"]');
     await page.waitForFunction(() => !document.querySelector('.proposal'), { timeout: 10000 });
     assert.equal(app.fake.refs.size, 1, 'the person said yes, so it moved');
-    assert.match(await text(page, '.authority'), /Refunds: \$100\.00 left of \$100\.00/, 'a person\'s yes does not use up the agent\'s limit');
+    assert.match(await text(page, '.authority'), /Cancel or refund: \$100\.00 left of \$100\.00/, 'a person\'s yes does not use up the agent\'s limit');
   });
 });
 
