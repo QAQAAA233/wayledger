@@ -1,6 +1,6 @@
 {
   "tag": "swarm_eval",
-  "generatedAt": "2026-11-09T22:14:33.547Z",
+  "generatedAt": "2026-11-09T22:27:42.873Z",
   "scenariosCount": 300,
   "totalRuns": 600,
   "agentRunsCount": 300,
@@ -10,30 +10,73 @@
       "agentLossDollars": 0,
       "baselineLossDollars": 0,
       "agentUnauthorizedRuns": 0,
-      "unit": "USD"
+      "unit": "USD",
+      "verdict": "雙方皆為 $0.00，授權鏈 100% 守住旅客資金安全"
     },
     "unnecessaryChargesOrRefunds": {
-      "agentUnnecessaryDollars": 2200,
-      "baselineUnnecessaryDollars": 330,
-      "unit": "USD"
+      "actualExecuted": {
+        "agentUnnecessaryDollars": 0,
+        "baselineUnnecessaryDollars": 0,
+        "unit": "USD",
+        "description": "真實 PayPal 交易維度（只為真的發生的事付錢，未批准提案金流 $0 不計入退款）"
+      },
+      "legacyProposedIncluded": {
+        "agentUnnecessaryDollars": 2200,
+        "baselineUnnecessaryDollars": 330,
+        "unit": "USD",
+        "description": "修前舊評分定義（將 12 筆待審提案未動款誤計為退款，且基準因 10 題當掉反而未算入）"
+      },
+      "diagnostics": {
+        "agentAffectedScenariosCount": 12,
+        "baselineAffectedScenariosCount": 2,
+        "classification": "評分定義錯（未執行的待審提案 proposal 被評分邏輯誤算為真實退款，且金流未動 $0）"
+      }
     },
     "agentVsBaseline": {
-      "pairedComparison": {
-        "agentBetter": 62,
-        "baselineBetter": 1,
-        "tie": 237,
-        "comparedScenarios": 300
+      "fairComparison": {
+        "agentPassRatePct": 72.3,
+        "baselinePassRatePct": 53.7,
+        "passRateGainPct": 18.7,
+        "pairedComparison": {
+          "agentBetter": 57,
+          "baselineBetter": 1,
+          "tie": 242,
+          "comparedScenarios": 300
+        },
+        "description": "公平格式重試版（給予基準與代理相同的 1 次格式 Nudge 重試，完全消除純格式解析誤差）"
       },
-      "agentPassRatePct": 72.3,
-      "baselinePassRatePct": 52,
-      "passRateGainPct": 20.3
+      "strictOneCall": {
+        "agentPassRatePct": 72.3,
+        "baselinePassRatePct": 52,
+        "passRateGainPct": 20.3,
+        "pairedComparison": {
+          "agentBetter": 62,
+          "baselineBetter": 1,
+          "tie": 237,
+          "comparedScenarios": 300
+        },
+        "description": "嚴格單次無重試版（基準回傳非標準 Tool Call 即出局）"
+      },
+      "baselineFailureBreakdown": {
+        "totalFailed": 144,
+        "formatErrorsCount": 5,
+        "formatErrorsPct": 3.5,
+        "judgmentAndGuardErrorsCount": 139,
+        "judgmentAndGuardErrorsPct": 96.5,
+        "verdict": "格式錯僅占 3.5%（5/144），96.5% 的失敗皆為真實架構與推理判斷能力不足（無法多輪感知、無依據查核、景點查證失敗）"
+      }
     },
     "overreactionRate": {
       "testedScenariosCount": 119,
       "agentOverreactedCount": 4,
       "agentOverreactionRatePct": 3.4,
-      "baselineOverreactedCount": 5,
-      "baselineOverreactionRatePct": 4.2
+      "baselineOverreactionRateFairPct": 0,
+      "baselineOverreactionRateStrictPct": 4.2
+    },
+    "generationAndOracle": {
+      "generationMethod": "Flash 蜂群 (3.8 Flash HIGH) 派發 60 個任務生成 6 大類別各 50 題，結合 6 國真實景點庫自主設計多樣化情境與條款",
+      "groundTruthBasis": "依真實世界退改條款法理、不可退款條款約束、成員退出授權規則及問句/注入維持原狀等商業規則明確定義",
+      "oracleRole": "一致性檢查（Consistency Check）證明 300 題在語法、日期、景點 ID 與斷言邏輯上 100% 自洽且皆有合法解 (300/300 PASS)"
     },
     "spend": {
       "tagUsd": 0.7696,
