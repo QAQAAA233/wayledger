@@ -152,3 +152,25 @@ test('PayPal activity and item quotas are separate lists, and every column set f
     for (const g of [budget, paypal, quota]) assert.ok(g.minWidth <= 640, `columns need ${g.minWidth}px but the card has about 640px at 1440 wide`);
   });
 });
+
+test('a demo-limit message is shown without a "Try again" button, and a server hiccup keeps it', { skip }, async () => {
+  await withApp({ vars: { AI_PER_IP_HOUR: '1' } }, async (page) => {
+    await plan(page);
+    await buttonReady(page);
+    await page.click('[data-act="new"]');
+    await page.type('#prompt', PROMPT);
+    await page.click('[data-act="plan"]');
+    await page.waitForSelector('.err', { timeout: 5000 });
+    assert.match(await text(page, '.err'), /allowance|limit/i);
+    assert.equal(await page.$('[data-act="retry-error"]'), null, 'retrying right away cannot help, so there is no button for it');
+    assert.equal(await page.$eval('[data-act="plan"]', (el) => el.disabled), false, 'the page is usable again');
+  });
+
+  await withApp({}, async (page) => {
+    await page.waitForSelector('#prompt');
+    await page.evaluate(() => { const real = window.fetch; window.fetch = (u, o) => (String(u).endsWith('/api/trips') && o?.method === 'POST' ? Promise.resolve(new Response(JSON.stringify({ error: { message: 'The planning model is busy right now.', code: 'AI_FAILED', retry: true } }), { status: 502 })) : real(u, o)); });
+    await page.type('#prompt', PROMPT);
+    await page.click('[data-act="plan"]');
+    await page.waitForSelector('[data-act="retry-error"]', { timeout: 5000 });
+  });
+});
