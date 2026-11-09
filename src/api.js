@@ -86,6 +86,7 @@ export async function handleRequest(request, env, deps = {}) {
     if (request.method !== 'POST') return json({ error: { message: 'Not found' } }, 404);
 
     if (parts[3] === 'close') return unwrap(await trip.call('closeTrip', [], token));
+    if (parts[3] === 'rehold') return unwrap(await trip.call('rehold', [], token));
     if (parts[3] === 'budget') return unwrap(await trip.call('setBudget', [body.amount], token));
     if (parts[3] === 'documents') return unwrap(await trip.call('addDocument', [body.text], token));
     if (parts[3] === 'mandate') {

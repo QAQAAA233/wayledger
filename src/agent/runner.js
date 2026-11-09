@@ -62,7 +62,7 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
     if (!r || r.status !== 'queued') return;
     r.status = 'running'; r.startedAt = now();
     const emit = async (e) => { r.events.push({ seq: r.events.length + 1, at: now(), ...e }); r.heartbeatAt = now(); await putRun(r); };
-    await emit({ kind: 'wake', title: { message: 'Read your message', wake: 'Woke up for its scheduled check', demo: 'Woke up (demo button)', webhook: 'Woke up because PayPal reported something' }[r.trigger] ?? 'Started', detail: r.trigger === 'message' ? `“${r.text}”` : r.diff, simulated: r.simulated });
+    await emit({ kind: 'wake', title: { message: 'Read your message', wake: 'Woke up for its scheduled check', demo: 'Woke up (demo button)' }[r.trigger] ?? 'Started', detail: r.trigger === 'message' ? `“${r.text}”` : r.diff, simulated: r.simulated });
     try {
       const s = await trip.state();
       const tools = createTools();

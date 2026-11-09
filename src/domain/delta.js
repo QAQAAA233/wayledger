@@ -113,11 +113,21 @@ export function diffToActions(oldPlan, newPlan, ledger) {
 // without asking PayPal again. It is released at the end if unused.
 export const BUFFER_ID = '_buffer';
 
-// First checkout: open a trip hold covering every priced item (and the buffer) and set each item's money aside.
+// The money each priced item is still missing: its planned amount less what is held or paid for it. At the first
+// checkout that is the whole price; later it is what a lost hold took with it.
+export function shortfalls(plan, ledger) {
+  return plan.items.filter((i) => i.amountCents > 0).flatMap((item) => {
+    const st = itemState(ledger, item.id);
+    const cents = item.amountCents - st.heldCents - st.paidCents;
+    return cents > 0 ? [{ item, cents }] : [];
+  });
+}
+
+// A trip hold covering every item that is short of money (and the buffer), with each item's money set aside.
 export function checkoutActions(plan, ledger, bufferCents = 0) {
-  const actions = plan.items
-    .filter((i) => i.amountCents > 0 && itemState(ledger, i.id).status === 'planned')
-    .map((i) => ({ type: 'hold', itemId: i.id, title: i.title, cents: i.amountCents, captureAfter: i.prepaid, why: 'initial trip hold and money set aside for the item' }));
+  const why = ledger.length ? 'a new hold for money PayPal no longer holds' : 'initial trip hold and money set aside for the item';
+  const actions = shortfalls(plan, ledger)
+    .map(({ item: i, cents }) => ({ type: 'hold', itemId: i.id, title: i.title, cents, captureAfter: i.prepaid, why }));
   if (actions.length > 0 && bufferCents > 0) actions.push({ type: 'hold', itemId: BUFFER_ID, title: 'Buffer for changes', cents: bufferCents, captureAfter: false, why: 'money the agent may use for changes without asking PayPal again' });
   return actions;
 }

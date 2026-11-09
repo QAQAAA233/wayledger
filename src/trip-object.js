@@ -51,9 +51,6 @@ export function createTripObject({ storage: raw, env, deps = {} }) {
       return wrap(async () => {
         const out = await runner.call('recordWebhook', [args[0]], null, true);
         if (!out.ok) throw Object.assign(new Error(out.e.message), { code: out.e.code });
-        if (out.v.attention) {
-          try { await agent.start({ trigger: 'webhook', diff: `PayPal reported ${args[0].event_type} for a hold the ledger still shows as open.` }); } catch { /* one run at a time, or the day's budget is spent */ }
-        }
         return { stored: out.v.stored };
       });
     }

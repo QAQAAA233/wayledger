@@ -103,7 +103,8 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     },
 
     async voidAuthorization(authId, itemId, { requestId, proposalId, cents }) {
-      await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId);
+      // already voided (by someone in PayPal, or because it ran out) is the state we wanted: PayPal's own answer follows
+      try { await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId); } catch (e) { if (e.issue !== 'PREVIOUSLY_VOIDED') throw e; }
       const full = await call('GET', `/v2/payments/authorizations/${authId}`);
       return { ...fact('void', itemId, full, { proposalId }), cents: cents ?? toCents(full.amount.value) };
     },

@@ -1,6 +1,6 @@
 import { normalizePlan, applyChange, planTotalCents, perPersonCents, splitChanged, PlanError, HUMAN_ONLY_OPS, isIsoDate, addDays, tripEndDate, dayDate } from './domain/plan.js';
-import { diffToActions, checkoutActions, closeActions, BUFFER_ID } from './domain/delta.js';
-import { appendFact, itemState, reserves, ledgerTotals, reconcile } from './domain/ledger.js';
+import { diffToActions, checkoutActions, closeActions, shortfalls, BUFFER_ID } from './domain/delta.js';
+import { appendFact, itemState, reserves, ledgerTotals, reconcile, holdLostFacts } from './domain/ledger.js';
 import { createProposal, confirmProposal, confirmByMandate, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
 import { createMandate, evaluateMandate, defaultTerms, normalizeTerms, describeTerms } from './domain/mandate.js';
 import { describeAction, describeEffect, paypalEffect, proposalSummary } from './domain/describe.js';
@@ -28,6 +28,8 @@ const DAY_MS = 86_400_000;
 // is still alive when the trip closes.
 export const HOLD_LEAD_DAYS = 26;
 export const MAX_DOCS = 5;
+// What PayPal answers when asked to charge a hold it no longer has.
+const HOLD_GONE = ['AUTHORIZATION_VOIDED', 'AUTHORIZATION_EXPIRED'];
 
 export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs = PROPOSAL_TTL_MS }) {
   const log = (s, kind, text) => { s.events.push({ at: now(), kind, text: String(text).slice(0, 600) }); if (s.events.length > 80) s.events.shift(); };
@@ -63,16 +65,30 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
   };
   const termsFor = (s) => s.mandateDraft ?? defaultTerms({ planTotalCents: planTotalCents(s.plan), validUntil: lastMoment(s) });
 
-  async function refreshCheckout(s, summary = proposalSummary('checkout')) {
-    const terms = termsFor(s);
-    const actions = checkoutActions(s.plan, s.ledger, terms.enabled ? terms.planIncreaseCapCents : 0);
+  // A hold for every item that is short of money. At the first checkout that is all of them, with the limits offered with
+  // it; later it is what a lost hold took with it, with the buffer the signed limits allow.
+  async function refreshCheckout(s) {
+    const booked = s.ledger.length > 0;
+    const terms = booked ? (s.mandate?.terms ?? { enabled: false }) : termsFor(s);
+    const spare = reserves(s.ledger).filter((r) => r.open).reduce((n, r) => n + r.unusedCents, 0);
+    const buffer = terms.enabled ? Math.max(0, terms.planIncreaseCapCents - spare) : 0;
+    const actions = checkoutActions(s.plan, s.ledger, buffer);
     if (actions.length === 0) { s.activeProposal = null; return null; }
-    return fresh(s, 'checkout', summary, actions, null, { mandateTerms: terms });
+    return fresh(s, 'checkout', proposalSummary(booked ? 'rehold' : 'checkout'), actions, null, booked ? {} : { mandateTerms: terms });
   }
 
-  const unfundedItems = (s) => s.plan.items
-    .filter((i) => i.amountCents > 0 && itemState(s.ledger, i.id).status === 'planned')
-    .map((i) => ({ itemId: i.id, title: i.title, cents: i.amountCents }));
+  const unfundedItems = (s) => shortfalls(s.plan, s.ledger).map(({ item, cents }) => ({ itemId: item.id, title: item.title, cents }));
+
+  // PayPal no longer holds an authorization (voided from outside, or run out): the ledger frees what was set aside on it
+  // and closes it, marked as PayPal's doing. False when there was nothing to record.
+  function noteHoldLost(s, authId, how) {
+    const facts = holdLostFacts(s.ledger, authId, now());
+    if (facts.length === 0) return false;
+    for (const f of facts) appendFact(s.ledger, f);
+    const names = facts.filter((f) => f.op === 'release').map((f) => s.plan.items.find((i) => i.id === f.itemId)?.title ?? f.itemId);
+    log(s, 'error', `PayPal cancelled the hold ${authId} (${how}).${names.length ? ` The money is no longer set aside for ${names.join(', ')}.` : ''}`);
+    return true;
+  }
 
   async function proposeClose(s) {
     const actions = closeActions(s.plan, s.ledger);
@@ -95,7 +111,9 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     const refundedSoFar = () => p.results.filter((r) => r.ok && p.actions[r.index].type === 'refund').reduce((a, r) => a + p.actions[r.index].cents, 0);
     // A proposal that already started may finish after it expired (a retry); one that never started may not begin.
     const started = () => p.results.some((r) => r.ok) || Boolean(p.captured?.length);
-    const ctx = () => ({ mandate: s.mandate, refundedSoFarCents: refundedSoFar(), allowExpired: started() });
+    // a refund under the signed limits is counted against them the moment it goes out, so a proposal that never finishes cannot hide it
+    const ctx = () => ({ mandate: s.mandate, refundedSoFarCents: 0, allowExpired: started() });
+    let failedAuth = null;
     const step = async (i, fn) => {
       if (done(i)) return;
       const action = p.actions[i];
@@ -104,10 +122,12 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         const facts = await fn(action);
         for (const f of [].concat(facts)) appendFact(s.ledger, f);
         p.results.push({ index: i, ok: true });
+        if (byMandate && action.type === 'refund') s.mandate.used.refundCents += action.cents;
       } catch (e) {
         p.results = p.results.filter((r) => r.index !== i);
         p.results.push({ index: i, ok: false, error: e.message, debugId: e.debugId });
         failed = e;
+        failedAuth = action.authId ?? null;
         log(s, 'error', `${action.type} "${action.title}" failed: ${e.message}`);
       }
     };
@@ -143,6 +163,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
           (p.captured ??= []).push(i);
         } catch (e) {
           failed = e;
+          failedAuth = alloc.id;
           p.results.push({ index: i, ok: false, error: e.message, debugId: e.debugId });
           log(s, 'error', `capture "${a.title}" failed: ${e.message}`);
         }
@@ -158,19 +179,28 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     }
 
     if (failed) {
-      p.status = 'failed';
       p.error = failed.message;
+      if (failedAuth && HOLD_GONE.includes(failed.issue)) {
+        // PayPal no longer holds the money these steps needed. Nothing can be retried on it, so the proposal ends here: what
+        // the person asked for stands in the plan, the ledger says which items have no money behind them, and a new hold
+        // (or closing the trip) is the way on.
+        noteHoldLost(s, failedAuth, failed.issue === 'AUTHORIZATION_EXPIRED' ? 'it ran out' : 'it was voided outside Wayledger');
+        p.status = 'stopped';
+        p.error = 'PayPal no longer holds this money, so the steps that needed it could not run.';
+        if (p.newPlan) s.plan = p.newPlan;
+        if (byMandate) s.mandate.uses.push({ proposalId: p.id, refundCents: refundedSoFar(), at: now() });
+        s.activeProposal = null;
+        return;
+      }
+      // a confirmation that ran out before anything started is an expired proposal, which can be worked out again
+      p.status = failed instanceof MoneyGuardError && failed.code === 'EXPIRED' && !started() ? 'expired' : 'failed';
       return;
     }
     p.status = 'executed';
     p.executedAt = now();
     if (p.newPlan) s.plan = p.newPlan;
     if (p.kind === 'close') s.closedAt = now();
-    if (byMandate) {
-      const refunded = refundedSoFar();
-      s.mandate.used.refundCents += refunded;
-      s.mandate.uses.push({ proposalId: p.id, refundCents: refunded, at: now() });
-    }
+    if (byMandate) s.mandate.uses.push({ proposalId: p.id, refundCents: refundedSoFar(), at: now() });
     if (p.kind === 'checkout' && p.mandateTerms?.enabled && !s.mandate) {
       s.mandate = await createMandate({ tripId: s.id, terms: p.mandateTerms, baselineTotalCents: planTotalCents(s.plan), proposalId: p.id, now: now() });
       log(s, 'system', `You signed limits for the agent: ${describeTerms(s.mandate.terms)}`);
@@ -424,6 +454,19 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       return s;
     },
 
+    // The items whose hold PayPal cancelled get a new one, which the person approves in PayPal like the first.
+    async rehold() {
+      const s = await load();
+      mustBeOpen(s);
+      if (s.ledger.length === 0 || shortfalls(s.plan, s.ledger).length === 0) throw new UserFacingError('Every item already has its money, so there is nothing to hold.', 'NOTHING_TO_HOLD');
+      assertNoFailed(s);
+      needBudget(s);
+      await refreshCheckout(s);
+      log(s, 'system', 'A new hold is ready for the items that lost theirs. Approve it in PayPal to put their money back.');
+      await store.put(s);
+      return s;
+    },
+
     // The same money difference, worked out again from the plan and the ledger as they are now. No model call:
     // this is the way out of an expired proposal. It only applies to a proposal nothing has run for.
     async refreshProposal(proposalId) {
@@ -431,7 +474,10 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       mustBeOpen(s);
       const p = getProposal(s, proposalId);
       if (!p) throw new UserFacingError('Proposal not found.', 'NOT_FOUND');
-      if (s.activeProposal !== p.id || !['pending', 'confirmed', 'expired'].includes(p.status) || p.results.length > 0) {
+      // Worked out again from the plan and the ledger as they are: a proposal nothing has run for, or one that failed (what
+      // already went through is in the ledger and is not done twice). The way out of a retry that cannot succeed.
+      const neverRan = !p.results.some((r) => r.ok) && !p.captured?.length;
+      if (s.activeProposal !== p.id || !(p.status === 'failed' || (['pending', 'confirmed', 'expired'].includes(p.status) && neverRan))) {
         throw new UserFacingError('This proposal cannot be refreshed.', 'NOT_REFRESHABLE');
       }
       p.status = 'superseded';
@@ -548,17 +594,17 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       const entry = { id: event.id, type: event.event_type, at: now(), resourceId: r.id ?? null, status: r.status ?? null, cents: r.amount?.value ? Math.round(Number(r.amount.value) * 100) : null, known: ours };
       s.webhooks = [...s.webhooks, entry].slice(-30);
       log(s, 'system', `PayPal reported: ${event.event_type.replace('PAYMENT.', '').replace(/\./g, ' ').toLowerCase()}${r.status ? ` (${r.status})` : ''}.`);
-      const attention = ['PAYMENT.AUTHORIZATION.VOIDED'].includes(event.event_type) && s.ledger.some((f) => f.op === 'authorize' && f.id === r.id) && !s.ledger.some((f) => f.op === 'void' && f.id === r.id);
-      if (attention) s.attention = { type: event.event_type, resourceId: r.id, at: now() };
+      // A signed "voided" for a hold the ledger still shows as open is a fact, not a question: the trip records it
+      // (the ledger, the screen and a way to hold again), and no model is woken.
+      const holdLost = event.event_type === 'PAYMENT.AUTHORIZATION.VOIDED' && ours ? noteHoldLost(s, r.id, 'PayPal reported it voided') : false;
       await store.put(s);
-      return { stored: true, attention };
+      return { stored: true, holdLost };
     },
 
     async noteRun(summary) {
       const s = await load();
       if (!s) return;
       s.runs = [...s.runs.filter((r) => r.id !== summary.id), summary].slice(-12);
-      if (summary.status !== 'running' && s.attention && summary.trigger === 'webhook') s.attention = null;
       await store.put(s);
     },
 
@@ -571,6 +617,8 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     isOwner(s, tokenHash) { return Boolean(s?.ownerTokenHash) && s.ownerTokenHash === tokenHash; },
 
     view(s, { owner = false } = {}) {
+      const lostAt = s.ledger.filter((f) => f.op === 'void' && f.external).at(-1)?.at ?? null;
+      const short = lostAt && !s.closedAt ? shortfalls(s.plan, s.ledger).map(({ item, cents }) => ({ id: item.id, title: item.title, cents })) : [];
       const items = s.plan.items.map((i) => ({ ...i, date: dayDate(s.plan.startDate, i.day), money: itemState(s.ledger, i.id) }));
       const removed = [...new Set(s.ledger.map((f) => f.itemId).filter((id) => id && id !== '_reserve'))]
         .filter((id) => !s.plan.items.some((i) => i.id === id))
@@ -600,7 +648,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         webhooks: s.webhooks.slice(-8),
         runs: s.runs,
         events: s.events,
-        attention: s.attention ?? null,
+        holdLost: short.length ? { at: lostAt, short, cents: short.reduce((n, x) => n + x.cents, 0), canRehold: owner } : null,
       };
     },
   };

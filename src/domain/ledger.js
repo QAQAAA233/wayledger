@@ -107,6 +107,18 @@ export function reserves(ledger) {
   });
 }
 
+// PayPal no longer holds this authorization (voided from outside, or run out). What the ledger has set aside on it is freed
+// and the authorization is closed, both marked as PayPal's doing. Nothing is returned for an authorization that is
+// already closed, so telling it twice records it once.
+export function holdLostFacts(ledger, authId, at) {
+  const r = reserves(ledger).find((x) => x.id === authId);
+  if (!r || r.voided) return [];
+  return [
+    ...r.heldItems.map((h) => ({ op: 'release', id: authId, itemId: h.itemId, cents: h.cents, status: 'RELEASED', at, external: true })),
+    { op: 'void', id: authId, itemId: '_reserve', cents: r.authorizedCents - r.capturedCents, status: 'VOIDED', at, external: true },
+  ];
+}
+
 // "The money follows the plan": once the trip is booked, every priced item must have exactly its planned amount
 // held or paid (net of refunds), free items nothing, and nothing may be left on an item that is no longer in the plan.
 export function planFundingCheck(plan, ledger) {

@@ -154,7 +154,7 @@ test('a proposal that stopped halfway must be finished before anything new, and 
   assert.equal(state(ctx).proposals[p.id].status, 'failed');
   await assert.rejects(ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: itemId(ctx, 'Sintra') }] }), (e) => e.code === 'PREVIOUS_FAILED');
   await assert.rejects(ctx.engine.closeTrip(), (e) => e.code === 'PREVIOUS_FAILED');
-  await assert.rejects(ctx.engine.refreshProposal(p.id), (e) => e.code === 'NOT_REFRESHABLE', 'a proposal that already moved money is finished, not recomputed');
+  // (a proposal that stopped halfway can also be worked out again from what really happened: see test/p4-lost-hold.test.js)
   broken = false;
   ctx.clock.t += PROPOSAL_TTL_MS + 60_000; // PayPal came back after the confirmation had run out: finishing is still allowed
   await engine.retry(p.id);

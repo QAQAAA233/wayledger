@@ -77,12 +77,14 @@ test('a refund event finds its trip through the charge it points up to', async (
   assert.equal(e.body.ignored, 'not about a trip of ours', 'a link that is not PayPal\'s payments API is never followed');
 });
 
-test('an authorization voided from outside is flagged and wakes the agent, which can read PayPal\'s side of it', async () => {
+test('an authorization voided from outside is recorded as a lost hold the trip shows, and no model is woken for it', async () => {
   const t = await booked();
   const out = await t.call('POST', '/api/webhooks/paypal', event(t.made.id, t.authId, { id: 'WH-EVT-9', event_type: 'PAYMENT.AUTHORIZATION.VOIDED', resource: { id: t.authId, status: 'VOIDED', custom_id: t.made.id } }), headers({ 'paypal-transmission-id': 'tx-9' }));
   assert.equal(out.status, 200);
   await new Promise((r) => setTimeout(r, 150));
   const v = await t.view();
-  assert.equal(v.runs.some((r) => r.trigger === 'webhook'), true);
+  assert.equal(v.runs.length, 0);
   assert.equal(v.webhooks[0].type, 'PAYMENT.AUTHORIZATION.VOIDED');
+  assert.equal(v.reserves[0].voided, true);
+  assert.ok(v.holdLost.short.length > 0);
 });

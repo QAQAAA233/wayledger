@@ -65,6 +65,7 @@ export function describeEffect(actions) {
 
 export function proposalSummary(kind, oldPlan, newPlan) {
   if (kind === 'checkout') return 'Place one hold with PayPal for the whole trip and set money aside for each item. Items paid in advance are charged now.';
+  if (kind === 'rehold') return 'Place a new hold with PayPal for the items whose hold was cancelled, and set money aside for each. Items paid in advance are charged now.';
   if (kind === 'close') return 'Close the trip: charge what is still held and release what is left of your trip hold.';
   const lines = oldPlan && newPlan ? describeEdit(oldPlan, newPlan) : [];
   return lines.length ? `${lines.join('. ')}.` : 'Update the plan.';

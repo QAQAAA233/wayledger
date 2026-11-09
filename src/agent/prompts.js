@@ -25,6 +25,5 @@ export function userMessageFor(trigger, data = {}) {
   if (trigger === 'message') return `The traveler wrote: """${data.text}"""\nWork out what, if anything, should change.`;
   if (trigger === 'wake') return `Scheduled check at ${data.at}. ${data.diff}\nDecide whether the plan should change. If it should and a safe option exists inside your limits, make the change; if it is fine, finish with no_change.`;
   if (trigger === 'demo') return `The traveler pressed the demo button, which wakes you as if the schedule had fired. ${data.diff}\nThe forecast tool may return a SIMULATED forecast; it is marked as simulated. Decide whether the plan should change.`;
-  if (trigger === 'webhook') return `PayPal reported: ${data.diff}\nCheck whether the plan and the money still agree and say what, if anything, should change.`;
   return String(data.text ?? '');
 }
