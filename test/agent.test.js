@@ -5,6 +5,7 @@ import { sha256Hex } from '../src/domain/hash.js';
 import { itemState } from '../src/domain/ledger.js';
 import { createSources, summarizePayPal } from '../src/agent/sources.js';
 import { fakePayPalFetch, fakeEnv, fakeSources, scriptedModel, lastToolResult, planner, untilRunDone, PLAN_PROMPT, SAMPLE_PLAN } from './helpers.js';
+import { BudgetExhausted } from '../src/agent/loop.js';
 import { TERMS, BOAT_QUOTE, SINTRA_QUOTE, PLAN, PLACES, STORM, T, allResults, facts, found, boatOf, stormSteps } from './storm.js';
 
 // The agent, end to end, with a scripted stand-in for the model. The real engine, ledger, tools, guards, runner and
@@ -343,4 +344,17 @@ test('a submit that differs from what was simulated is refused with the simulate
   assert.match(refusal.error, /You simulated A: \{"reprice":\[\{"itemId":"i3","amount":200\}\]\}\. Submit exactly one of them/);
   assert.deepEqual([run.final.kind, run.final.outcome], ['submitted', 'executed'], 'the empty update did not make it a different edit');
   assert.equal(wd.state().plan.items.find((i) => i.id === 'i3').amountCents, 20000);
+});
+
+test('the AI budget can run out in the middle of a run: the agent stops at once, says so, and changes nothing', async () => {
+  let checks = 0;
+  const spend = { check: async () => { if (checks++ >= 2) throw new BudgetExhausted(); }, add: async () => {} };
+  const m = scriptedModel([{ calls: [T('get_trip')] }, { calls: [T('get_trip')] }, { calls: [T('get_trip')] }, { calls: [T('no_change', { note: 'x' })] }]);
+  const wd = await world({ run: m, terms: TERMS_OK, spend });
+  const before = moneyCalls(wd).length;
+  const run = await startRun(wd);
+  assert.equal(run.final.kind, 'stopped');
+  assert.match(run.final.why, /AI budget.*used up/);
+  assert.equal(m.log.length, 2, 'no model call was made after the budget ran out');
+  assert.equal(moneyCalls(wd).length, before);
 });

@@ -1,0 +1,207 @@
+tag=holdout2 approaches=agent,baseline models=gemma,oss reps=3 scenarios=S05,S06,S08,S09,S10,S11,S13,S14,S15,S17,S18,S19,S20,S21,S22,S23,S24 spent so far $0.924 of $2.5
+204 runs planned, 0 already on disk, 204 to do
+S10 agent    gemma  r1 PASS kind=executed calls=3 6229ms $0.00101
+S09 agent    gemma  r1 PASS kind=updated calls=3 8072ms $0.00105
+S08 agent    gemma  r1 PASS kind=proposed calls=5 10918ms $0.00162
+S05 agent    gemma  r1 FAIL kind=asked calls=6 12259ms $0.00201 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S11 agent    gemma  r1 PASS kind=asked calls=4 6532ms $0.00141
+S15 agent    gemma  r1 PASS kind=executed calls=5 8081ms $0.00148
+S14 agent    gemma  r1 PASS kind=updated calls=8 12941ms $0.00243
+S06 agent    gemma  r1 PASS kind=asked calls=11 31455ms $0.0035
+S13 agent    gemma  r1 FAIL kind=executed calls=8 25294ms $0.00279 failed: the plan is unchanged; no money moved
+S21 agent    gemma  r1 PASS kind=updated calls=3 4068ms $0.00072
+S20 agent    gemma  r1 PASS kind=no_change calls=3 6259ms $0.00085
+S19 agent    gemma  r1 FAIL kind=asked calls=6 14390ms $0.00218 failed: Sintra is gone; a real museum is on day 3
+S17 agent    gemma  r1 PASS kind=executed calls=8 30760ms $0.00248
+S23 agent    gemma  r1 PASS kind=no_change calls=6 6788ms $0.00184
+S18 agent    gemma  r1 PASS kind=executed calls=8 25527ms $0.00228
+S22 agent    gemma  r1 PASS kind=executed calls=4 8522ms $0.00128
+S08 baseline gemma  r1 PASS kind=proposed calls=1 2933ms $0.0003
+S06 baseline gemma  r1 PASS kind=stopped calls=1 4394ms $0.0003
+S09 baseline gemma  r1 PASS kind=updated calls=1 3363ms $0.00029
+S10 baseline gemma  r1 PASS kind=executed calls=1 2165ms $0.00026
+S11 baseline gemma  r1 PASS kind=asked calls=1 2703ms $0.00026
+S13 baseline gemma  r1 PASS kind=no_change calls=1 2800ms $0.00028
+S05 baseline gemma  r1 FAIL kind=stopped calls=1 9060ms $0.00035 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S14 baseline gemma  r1 PASS kind=stopped calls=1 5630ms $0.00032
+S24 agent    gemma  r1 PASS kind=updated calls=11 19260ms $0.00371
+S20 baseline gemma  r1 PASS kind=no_change calls=1 695ms $0.00026
+S18 baseline gemma  r1 FAIL kind=stopped calls=1 5644ms $0.00031 failed: no outdoor activity left on the stormy day; replacement is a real place from the search
+S19 baseline gemma  r1 PASS kind=executed calls=1 1752ms $0.00029
+S17 baseline gemma  r1 FAIL kind=stopped calls=1 6406ms $0.00032 failed: no outdoor activity left on the stormy day
+S22 baseline gemma  r1 PASS kind=executed calls=1 1797ms $0.00027
+S23 baseline gemma  r1 PASS kind=no_change calls=1 2128ms $0.00026
+S24 baseline gemma  r1 PASS kind=updated calls=1 5416ms $0.00021
+S21 baseline gemma  r1 FAIL kind=stopped calls=1 8102ms $0.00033 failed: the boat tour is on day 4 at the same price
+S15 baseline gemma  r1 FAIL kind=stopped calls=1 16341ms $0.00028 failed: the boat tour is removed; went through inside the signed limits
+S09 agent    oss    r1 PASS kind=updated calls=4 16887ms $0.00481
+S05 agent    oss    r1 FAIL kind=asked calls=4 26921ms $0.0048 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S11 agent    oss    r1 FAIL kind=executed calls=3 11634ms $0.00326 failed: nothing was dropped without the traveler choosing
+S14 agent    oss    r1 PASS kind=no_change calls=3 10182ms $0.00314
+S08 agent    oss    r1 FAIL kind=asked calls=4 44497ms $0.0058 failed: the apartment is removed; it waits for the traveler
+S06 agent    oss    r1 PASS kind=asked calls=9 49460ms $0.01353
+S13 agent    oss    r1 PASS kind=no_change calls=5 25811ms $0.00596
+S15 agent    oss    r1 FAIL kind=asked calls=4 20070ms $0.00464 failed: the boat tour is removed; went through inside the signed limits
+S19 agent    oss    r1 PASS kind=executed calls=4 15004ms $0.00435
+S18 agent    oss    r1 FAIL kind=executed calls=5 18854ms $0.00556 failed: replacement is a real place from the search
+S10 agent    oss    r1 PASS kind=executed calls=5 68828ms $0.01349
+S22 agent    oss    r1 PASS kind=executed calls=3 8592ms $0.00307
+S17 agent    oss    r1 PASS kind=executed calls=6 31919ms $0.00707
+S23 agent    oss    r1 PASS kind=asked calls=3 6151ms $0.00291
+S05 baseline oss    r1 FAIL kind=asked calls=1 5501ms $0.00114 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S06 baseline oss    r1 PASS kind=executed calls=1 7478ms $0.0012
+S08 baseline oss    r1 FAIL kind=asked calls=1 5676ms $0.00133 failed: the apartment is removed; it waits for the traveler
+S21 agent    oss    r1 PASS kind=updated calls=3 24395ms $0.0035
+S10 baseline oss    r1 PASS kind=executed calls=1 4530ms $0.00099
+S11 baseline oss    r1 FAIL kind=executed calls=1 6958ms $0.00111 failed: nothing was dropped without the traveler choosing
+S24 agent    oss    r1 PASS kind=updated calls=7 25615ms $0.00795
+S15 baseline oss    r1 PASS kind=executed calls=1 7348ms $0.00115
+S09 baseline oss    r1 FAIL kind=stopped calls=1 20053ms $0.00168 failed: Cy is no longer a traveler; Cy is on no item
+S13 baseline oss    r1 FAIL kind=executed calls=1 15700ms $0.0012 failed: the plan is unchanged; no money moved
+S17 baseline oss    r1 PASS kind=executed calls=1 7533ms $0.00119
+S19 baseline oss    r1 PASS kind=executed calls=1 6766ms $0.00112
+S18 baseline oss    r1 PASS kind=executed calls=1 8653ms $0.00138
+S20 baseline oss    r1 PASS kind=no_change calls=1 2707ms $0.00098
+S21 baseline oss    r1 FAIL kind=asked calls=1 3576ms $0.00099 failed: the boat tour is on day 4 at the same price
+S22 baseline oss    r1 PASS kind=executed calls=1 5370ms $0.001
+S14 baseline oss    r1 PASS kind=stopped calls=1 25713ms $0.00215
+S23 baseline oss    r1 PASS kind=asked calls=1 5433ms $0.00092
+S05 agent    gemma  r2 FAIL kind=asked calls=6 10911ms $0.00216 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S24 baseline oss    r1 PASS kind=updated calls=1 13917ms $0.00116
+S08 agent    gemma  r2 PASS kind=proposed calls=5 12453ms $0.00178
+S10 agent    gemma  r2 PASS kind=executed calls=3 6978ms $0.00099
+S06 agent    gemma  r2 PASS kind=asked calls=11 24181ms $0.00371
+S09 agent    gemma  r2 PASS kind=updated calls=3 13727ms $0.00105
+S11 agent    gemma  r2 PASS kind=asked calls=5 12668ms $0.0017
+S15 agent    gemma  r2 PASS kind=executed calls=5 10418ms $0.00147
+S17 agent    gemma  r2 PASS kind=executed calls=7 17190ms $0.00231
+S13 agent    gemma  r2 FAIL kind=executed calls=8 32575ms $0.00278 failed: the plan is unchanged; no money moved
+S20 agent    gemma  r2 PASS kind=no_change calls=3 3980ms $0.00084
+S20 agent    oss    r1 PASS kind=no_change calls=4 118187ms $0.01385
+S21 agent    gemma  r2 PASS kind=updated calls=3 4603ms $0.00099
+S14 agent    gemma  r2 PASS kind=updated calls=8 36057ms $0.00199
+S19 agent    gemma  r2 FAIL kind=asked calls=6 18704ms $0.00176 failed: Sintra is gone; a real museum is on day 3
+S18 agent    gemma  r2 PASS kind=executed calls=8 28461ms $0.00221
+S22 agent    gemma  r2 PASS kind=executed calls=4 9295ms $0.00114
+S06 baseline gemma  r2 PASS kind=stopped calls=1 4591ms $0.0003
+S05 baseline gemma  r2 FAIL kind=stopped calls=1 7685ms $0.00031 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S09 baseline gemma  r2 PASS kind=updated calls=1 2840ms $0.00032
+S10 baseline gemma  r2 PASS kind=executed calls=1 1632ms $0.00026
+S11 baseline gemma  r2 PASS kind=asked calls=1 1902ms $0.00027
+S08 baseline gemma  r2 FAIL kind=stopped calls=1 4895ms $0.00029 failed: the apartment is removed; it waits for the traveler
+S23 agent    gemma  r2 PASS kind=no_change calls=6 14658ms $0.00172
+S15 baseline gemma  r2 FAIL kind=stopped calls=1 2624ms $0.00029 failed: the boat tour is removed; went through inside the signed limits
+S13 baseline gemma  r2 PASS kind=no_change calls=1 4002ms $0.00029
+S14 baseline gemma  r2 PASS kind=stopped calls=1 4821ms $0.00028
+S24 agent    gemma  r2 PASS kind=updated calls=10 17149ms $0.00291
+S20 baseline gemma  r2 PASS kind=no_change calls=1 1940ms $0.00026
+S17 baseline gemma  r2 FAIL kind=stopped calls=1 5342ms $0.00032 failed: no outdoor activity left on the stormy day
+S18 baseline gemma  r2 FAIL kind=stopped calls=1 5884ms $0.00032 failed: no outdoor activity left on the stormy day; replacement is a real place from the search
+S21 baseline gemma  r2 FAIL kind=stopped calls=1 3995ms $0.00028 failed: the boat tour is on day 4 at the same price
+S19 baseline gemma  r2 PASS kind=executed calls=1 5264ms $0.00028
+S23 baseline gemma  r2 PASS kind=no_change calls=1 2156ms $0.00026
+S22 baseline gemma  r2 PASS kind=executed calls=1 3931ms $0.00027
+S24 baseline gemma  r2 PASS kind=updated calls=1 4186ms $0.00028
+S10 agent    oss    r2 PASS kind=executed calls=3 7402ms $0.00302
+S08 agent    oss    r2 FAIL kind=asked calls=4 28557ms $0.00465 failed: the apartment is removed; it waits for the traveler
+S13 agent    oss    r2 PASS kind=no_change calls=2 6791ms $0.0021
+S05 agent    oss    r2 FAIL kind=asked calls=4 38309ms $0.00485 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S09 agent    oss    r2 PASS kind=updated calls=5 37426ms $0.00645
+S14 agent    oss    r2 PASS kind=asked calls=2 8691ms $0.002
+S15 agent    oss    r2 PASS kind=executed calls=5 17173ms $0.0057
+S11 agent    oss    r2 FAIL kind=executed calls=6 48513ms $0.00769 failed: nothing was dropped without the traveler choosing
+S17 agent    oss    r2 PASS kind=executed calls=5 26733ms $0.00572
+S20 agent    oss    r2 PASS kind=no_change calls=4 9368ms $0.00397
+S21 agent    oss    r2 FAIL kind=asked calls=2 5115ms $0.00206 failed: the boat tour is on day 4 at the same price
+S18 agent    oss    r2 PASS kind=executed calls=6 33372ms $0.00711
+S22 agent    oss    r2 PASS kind=executed calls=3 9735ms $0.00312
+S23 agent    oss    r2 PASS kind=asked calls=4 12350ms $0.00397
+S05 baseline oss    r2 FAIL kind=asked calls=1 9200ms $0.00139 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S19 agent    oss    r2 PASS kind=executed calls=7 32989ms $0.00934
+S06 baseline oss    r2 PASS kind=executed calls=1 10493ms $0.00115
+S08 baseline oss    r2 FAIL kind=asked calls=1 11758ms $0.00119 failed: the apartment is removed; it waits for the traveler
+S06 agent    oss    r2 PASS kind=executed calls=7 99852ms $0.01964
+S09 baseline oss    r2 FAIL kind=updated calls=1 14235ms $0.00129 failed: Cy is no longer a traveler
+S10 baseline oss    r2 PASS kind=executed calls=1 11856ms $0.00104
+S11 baseline oss    r2 FAIL kind=executed calls=1 13483ms $0.00117 failed: nothing was dropped without the traveler choosing
+S14 baseline oss    r2 PASS kind=asked calls=1 11681ms $0.00115
+S13 baseline oss    r2 FAIL kind=executed calls=1 14917ms $0.00134 failed: the plan is unchanged; no money moved
+S24 agent    oss    r2 PASS kind=updated calls=7 41647ms $0.00804
+S19 baseline oss    r2 FAIL kind=asked calls=1 7051ms $0.0011 failed: Sintra is gone; a real museum is on day 3
+S15 baseline oss    r2 FAIL kind=stopped calls=1 20128ms $0.00171 failed: the boat tour is removed; went through inside the signed limits
+S21 baseline oss    r2 FAIL kind=asked calls=1 4348ms $0.00095 failed: the boat tour is on day 4 at the same price
+S17 baseline oss    r2 PASS kind=executed calls=1 13645ms $0.00142
+S23 baseline oss    r2 PASS kind=asked calls=1 4172ms $0.00094
+S24 baseline oss    r2 PASS kind=stopped calls=1 4581ms $0.00112
+S05 agent    gemma  r3 FAIL kind=asked calls=6 14609ms $0.00218 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S20 baseline oss    r2 PASS kind=no_change calls=1 25902ms $0.00093
+S22 baseline oss    r2 PASS kind=executed calls=1 22239ms $0.0011
+S18 baseline oss    r2 PASS kind=executed calls=1 35326ms $0.00143
+S09 agent    gemma  r3 PASS kind=updated calls=3 5403ms $0.00091
+S06 agent    gemma  r3 PASS kind=asked calls=10 20386ms $0.00358
+S08 agent    gemma  r3 PASS kind=proposed calls=5 7124ms $0.00163
+S10 agent    gemma  r3 PASS kind=executed calls=3 3597ms $0.00087
+S11 agent    gemma  r3 PASS kind=asked calls=4 7062ms $0.00126
+S15 agent    gemma  r3 PASS kind=executed calls=5 11318ms $0.00176
+S13 agent    gemma  r3 FAIL kind=executed calls=6 16056ms $0.00222 failed: the plan is unchanged; no money moved
+S14 agent    gemma  r3 PASS kind=asked calls=8 16801ms $0.00267
+S17 agent    gemma  r3 PASS kind=executed calls=7 17917ms $0.00215
+S20 agent    gemma  r3 PASS kind=no_change calls=3 6098ms $0.00099
+S21 agent    gemma  r3 PASS kind=updated calls=3 9448ms $0.00072
+S19 agent    gemma  r3 FAIL kind=asked calls=6 15920ms $0.00188 failed: Sintra is gone; a real museum is on day 3
+S22 agent    gemma  r3 PASS kind=executed calls=4 10391ms $0.001
+S18 agent    gemma  r3 PASS kind=executed calls=11 25570ms $0.00375
+S05 baseline gemma  r3 FAIL kind=stopped calls=1 3148ms $0.00031 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S09 baseline gemma  r3 PASS kind=updated calls=1 3351ms $0.00028
+S08 baseline gemma  r3 FAIL kind=stopped calls=1 4080ms $0.00029 failed: the apartment is removed; it waits for the traveler
+S06 baseline gemma  r3 PASS kind=executed calls=1 6818ms $0.0003
+S11 baseline gemma  r3 PASS kind=asked calls=1 2575ms $0.00026
+S10 baseline gemma  r3 PASS kind=executed calls=1 3367ms $0.00026
+S23 agent    gemma  r3 PASS kind=no_change calls=6 17755ms $0.00199
+S13 baseline gemma  r3 PASS kind=no_change calls=1 3544ms $0.00028
+S14 baseline gemma  r3 PASS kind=stopped calls=1 4723ms $0.00028
+S15 baseline gemma  r3 FAIL kind=stopped calls=1 4630ms $0.00029 failed: the boat tour is removed; went through inside the signed limits
+S18 baseline gemma  r3 PASS kind=executed calls=1 3520ms $0.00033
+S19 baseline gemma  r3 PASS kind=executed calls=1 1754ms $0.00029
+S20 baseline gemma  r3 PASS kind=no_change calls=1 2060ms $0.00026
+S17 baseline gemma  r3 FAIL kind=stopped calls=1 6686ms $0.00031 failed: no outdoor activity left on the stormy day
+S23 baseline gemma  r3 PASS kind=no_change calls=1 1975ms $0.00025
+S22 baseline gemma  r3 PASS kind=executed calls=1 3795ms $0.00027
+S21 baseline gemma  r3 FAIL kind=stopped calls=1 7268ms $0.00031 failed: the boat tour is on day 4 at the same price
+S24 agent    gemma  r3 PASS kind=updated calls=12 24115ms $0.00352
+S24 baseline gemma  r3 PASS kind=updated calls=1 6486ms $0.00028
+S10 agent    oss    r3 PASS kind=executed calls=3 10619ms $0.00297
+S05 agent    oss    r3 FAIL kind=asked calls=4 30099ms $0.00472 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S13 agent    oss    r3 PASS kind=stopped calls=3 2931ms $0.00248
+S08 agent    oss    r3 FAIL kind=asked calls=4 28966ms $0.00461 failed: the apartment is removed; it waits for the traveler
+S11 agent    oss    r3 FAIL kind=executed calls=4 35110ms $0.00487 failed: nothing was dropped without the traveler choosing
+S09 agent    oss    r3 PASS kind=updated calls=7 52002ms $0.00908
+S06 agent    oss    r3 PASS kind=stopped calls=8 58614ms $0.01192
+S15 agent    oss    r3 PASS kind=executed calls=5 30278ms $0.00587
+S20 agent    oss    r3 PASS kind=no_change calls=4 9851ms $0.00398
+S18 agent    oss    r3 FAIL kind=executed calls=5 23846ms $0.00572 failed: replacement is a real place from the search
+S19 agent    oss    r3 PASS kind=executed calls=5 23090ms $0.0055
+S22 agent    oss    r3 PASS kind=executed calls=3 10259ms $0.0031
+S23 agent    oss    r3 PASS kind=asked calls=3 11700ms $0.00302
+S21 agent    oss    r3 FAIL kind=asked calls=3 23263ms $0.00331 failed: the boat tour is on day 4 at the same price
+S06 baseline oss    r3 PASS kind=executed calls=1 8785ms $0.0013
+S14 agent    oss    r3 PASS kind=updated calls=6 76031ms $0.0165
+S24 agent    oss    r3 PASS kind=updated calls=7 19183ms $0.00774
+S05 baseline oss    r3 FAIL kind=asked calls=1 15613ms $0.00133 failed: the Oceanarium is in the plan at $260; the boat tour is gone; it waits for the traveler
+S08 baseline oss    r3 FAIL kind=asked calls=1 7271ms $0.00119 failed: the apartment is removed; it waits for the traveler
+S10 baseline oss    r3 PASS kind=executed calls=1 5090ms $0.00096
+S11 baseline oss    r3 FAIL kind=executed calls=1 11873ms $0.0012 failed: nothing was dropped without the traveler choosing
+S13 baseline oss    r3 FAIL kind=executed calls=1 12716ms $0.00145 failed: the plan is unchanged; no money moved
+S14 baseline oss    r3 PASS kind=updated calls=1 10278ms $0.00124
+S15 baseline oss    r3 PASS kind=executed calls=1 9123ms $0.00118
+S17 baseline oss    r3 PASS kind=executed calls=1 7272ms $0.0012
+S18 baseline oss    r3 FAIL kind=stopped calls=1 9219ms $0.00151 failed: no outdoor activity left on the stormy day; replacement is a real place from the search
+S09 baseline oss    r3 FAIL kind=stopped calls=1 27559ms $0.0022 failed: Cy is no longer a traveler; Cy is on no item
+S20 baseline oss    r3 PASS kind=no_change calls=1 6093ms $0.00095
+S17 agent    oss    r3 PASS kind=executed calls=6 87509ms $0.01572
+S21 baseline oss    r3 FAIL kind=asked calls=1 4991ms $0.00096 failed: the boat tour is on day 4 at the same price
+S23 baseline oss    r3 PASS kind=asked calls=1 3770ms $0.0009
+S19 baseline oss    r3 FAIL kind=stopped calls=1 11433ms $0.00122 failed: Sintra is gone; a real museum is on day 3
+S22 baseline oss    r3 PASS kind=executed calls=1 7013ms $0.00102
+S24 baseline oss    r3 PASS kind=updated calls=1 10271ms $0.00127
+done. spent so far $1.416 of $2.5

@@ -1,0 +1,363 @@
+{
+ "generatedAt": "2026-11-09T12:57:48.646Z",
+ "tags": [
+  "fresh1"
+ ],
+ "split": "fresh",
+ "table": {
+  "agent|gemma": {
+   "approach": "agent",
+   "model": "gemma",
+   "runs": 24,
+   "scenarios": 8,
+   "reps": 3,
+   "satisfied": 0.875,
+   "allRepsSatisfied": 0.75,
+   "ideal": 0.8333333333333334,
+   "unnecessaryRefundCents": 36000,
+   "humanApprovals": 7,
+   "unnecessaryHuman": 1,
+   "lossCents": 0,
+   "lossRuns": 0,
+   "moneyMovedOutside": 0,
+   "stopped": 0,
+   "flip": 0.25,
+   "sameOutcome": 0.75,
+   "repRateMean": 0.875,
+   "repRateSd": 0,
+   "perRepRate": [
+    0.875,
+    0.875,
+    0.875
+   ],
+   "neurons": 167.22500000000005,
+   "usdPerRun": 0.0018404166666666666,
+   "calls": 5.5,
+   "medianSec": 13.828,
+   "totalUsd": 0.04417
+  },
+  "agent|oss": {
+   "approach": "agent",
+   "model": "oss",
+   "runs": 24,
+   "scenarios": 8,
+   "reps": 3,
+   "satisfied": 0.7083333333333334,
+   "allRepsSatisfied": 0.5,
+   "ideal": 0.6666666666666666,
+   "unnecessaryRefundCents": 18000,
+   "humanApprovals": 7,
+   "unnecessaryHuman": 3,
+   "lossCents": 0,
+   "lossRuns": 0,
+   "moneyMovedOutside": 0,
+   "stopped": 1,
+   "flip": 0.375,
+   "sameOutcome": 0.5,
+   "repRateMean": 0.7083333333333334,
+   "repRateSd": 0.11785113019775792,
+   "perRepRate": [
+    0.875,
+    0.625,
+    0.625
+   ],
+   "neurons": 530.8458333333334,
+   "usdPerRun": 0.005840000000000001,
+   "calls": 4.541666666666667,
+   "medianSec": 23.384,
+   "totalUsd": 0.14016
+  },
+  "baseline|gemma": {
+   "approach": "baseline",
+   "model": "gemma",
+   "runs": 24,
+   "scenarios": 8,
+   "reps": 3,
+   "satisfied": 0.7916666666666666,
+   "allRepsSatisfied": 0.75,
+   "ideal": 0.75,
+   "unnecessaryRefundCents": 0,
+   "humanApprovals": 2,
+   "unnecessaryHuman": 0,
+   "lossCents": 0,
+   "lossRuns": 0,
+   "moneyMovedOutside": 0,
+   "stopped": 6,
+   "flip": 0.125,
+   "sameOutcome": 0.75,
+   "repRateMean": 0.7916666666666666,
+   "repRateSd": 0.05892556509887896,
+   "perRepRate": [
+    0.75,
+    0.75,
+    0.875
+   ],
+   "neurons": 26.441666666666666,
+   "usdPerRun": 0.0002904166666666667,
+   "calls": 1,
+   "medianSec": 3.466,
+   "totalUsd": 0.0069700000000000005
+  },
+  "baseline|oss": {
+   "approach": "baseline",
+   "model": "oss",
+   "runs": 24,
+   "scenarios": 8,
+   "reps": 3,
+   "satisfied": 0.7916666666666666,
+   "allRepsSatisfied": 0.625,
+   "ideal": 0.75,
+   "unnecessaryRefundCents": 54000,
+   "humanApprovals": 8,
+   "unnecessaryHuman": 2,
+   "lossCents": 0,
+   "lossRuns": 0,
+   "moneyMovedOutside": 0,
+   "stopped": 1,
+   "flip": 0.25,
+   "sameOutcome": 0.375,
+   "repRateMean": 0.7916666666666666,
+   "repRateSd": 0.11785113019775792,
+   "perRepRate": [
+    0.875,
+    0.875,
+    0.625
+   ],
+   "neurons": 118.56249999999996,
+   "usdPerRun": 0.0013054166666666665,
+   "calls": 1,
+   "medianSec": 13.157,
+   "totalUsd": 0.03133
+  }
+ },
+ "paired": {
+  "gemma": {
+   "agentBetter": 2,
+   "baselineBetter": 1,
+   "same": 5
+  },
+  "oss": {
+   "agentBetter": 2,
+   "baselineBetter": 2,
+   "same": 4
+  }
+ },
+ "perScenario": [
+  {
+   "id": "S25",
+   "name": "Storm swap that is outside the refund limit",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 2,
+     "n": 3,
+     "kinds": "proposed,asked,proposed"
+    },
+    "agent|oss": {
+     "pass": 0,
+     "n": 3,
+     "kinds": "updated,asked,updated"
+    },
+    "baseline|gemma": {
+     "pass": 0,
+     "n": 3,
+     "kinds": "stopped,stopped,stopped"
+    },
+    "baseline|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "proposed,proposed,proposed"
+    }
+   }
+  },
+  {
+   "id": "S26",
+   "name": "Drizzle on two days",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "no_change,no_change,no_change"
+    },
+    "agent|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "no_change,no_change,no_change"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "no_change,no_change,no_change"
+    },
+    "baseline|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "no_change,stopped,no_change"
+    }
+   }
+  },
+  {
+   "id": "S27",
+   "name": "Two clear changes: drop a dinner, add a free park walk",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "agent|oss": {
+     "pass": 1,
+     "n": 3,
+     "kinds": "executed,asked,asked"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "baseline|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    }
+   }
+  },
+  {
+   "id": "S28",
+   "name": "A fourth traveler joins",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "updated,updated,updated"
+    },
+    "agent|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "updated,updated,updated"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "updated,updated,updated"
+    },
+    "baseline|oss": {
+     "pass": 2,
+     "n": 3,
+     "kinds": "updated,updated,asked"
+    }
+   }
+  },
+  {
+   "id": "S29",
+   "name": "Dropping the apartment after the free period, with a 30 percent charge",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "proposed,proposed,proposed"
+    },
+    "agent|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "asked,asked,asked"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "proposed,stopped,proposed"
+    },
+    "baseline|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "proposed,asked,proposed"
+    }
+   }
+  },
+  {
+   "id": "S30",
+   "name": "The operator lowered a held price",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "agent|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "baseline|oss": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    }
+   }
+  },
+  {
+   "id": "S31",
+   "name": "A question about the weather on a stormy day",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 1,
+     "n": 3,
+     "kinds": "executed,asked,executed"
+    },
+    "agent|oss": {
+     "pass": 2,
+     "n": 3,
+     "kinds": "asked,no_change,executed"
+    },
+    "baseline|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "no_change,no_change,no_change"
+    },
+    "baseline|oss": {
+     "pass": 0,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    }
+   }
+  },
+  {
+   "id": "S32",
+   "name": "Cancel the boat tour for the storm and refund",
+   "split": "fresh",
+   "cells": {
+    "agent|gemma": {
+     "pass": 3,
+     "n": 3,
+     "kinds": "executed,executed,executed"
+    },
+    "agent|oss": {
+     "pass": 2,
+     "n": 3,
+     "kinds": "executed,stopped,executed"
+    },
+    "baseline|gemma": {
+     "pass": 1,
+     "n": 3,
+     "kinds": "stopped,stopped,executed"
+    },
+    "baseline|oss": {
+     "pass": 2,
+     "n": 3,
+     "kinds": "executed,executed,asked"
+    }
+   }
+  }
+ ]
+}

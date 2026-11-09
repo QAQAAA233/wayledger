@@ -67,6 +67,7 @@ test('attack 2: the plan changes while a PayPal window is open, then the old ord
   const stale = await call(env, 'POST', `/api/trips/${id}/proposals/${old.id}/approve`, { orderId: order.body.orderId }, as(ownerToken));
   assert.ok([409].includes(stale.status), JSON.stringify(stale.body));
   assert.ok(['NOT_CONFIRMED', 'NOT_ACTIVE'].includes(stale.body.error.code));
+  assert.match(stale.body.error.message, /plan changed after you opened PayPal.*nothing was held/);
   assert.equal(fake.auths.size, 0, 'no PayPal authorization exists for the old plan');
   const after = (await call(env, 'GET', `/api/trips/${id}`, undefined, as(ownerToken))).body;
   assert.equal(after.ledger.length, 0);

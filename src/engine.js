@@ -478,7 +478,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     async approveOrder(proposalId, orderId) {
       const s = await load();
       const p = getProposal(s, proposalId);
-      if (!p || !['confirmed', 'executing', 'failed'].includes(p.status)) throw new UserFacingError('This proposal is not waiting for PayPal approval.', 'NOT_CONFIRMED');
+      if (!p || !['confirmed', 'executing', 'failed'].includes(p.status)) throw new UserFacingError(p?.status === 'superseded' ? 'The plan changed after you opened PayPal, so this approval was not used and nothing was held. Review the new proposal and approve again.' : 'This proposal is not waiting for PayPal approval.', 'NOT_CONFIRMED');
       activeOnly(s, p);
       needBudget(s);
       if (p.orderId !== orderId) throw new UserFacingError('That PayPal order does not belong to this proposal.', 'WRONG_ORDER');

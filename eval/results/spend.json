@@ -1,6 +1,6 @@
 {
- "neurons": 111869.97022104263,
- "calls": 1892,
+ "neurons": 133967.80012083054,
+ "calls": 2211,
  "byTag": {
   "dev0": {
    "neurons": 4991.749555587769,
@@ -57,14 +57,22 @@
    }
   },
   "holdout2": {
-   "neurons": 27855.36814880371,
-   "calls": 410,
+   "neurons": 29719.008771896362,
+   "calls": 440,
    "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 6721.053504943848,
-    "@cf/openai/gpt-oss-120b": 21134.314643859863
+    "@cf/google/gemma-4-26b-a4b-it": 7286.508024215698,
+    "@cf/openai/gpt-oss-120b": 22432.500747680664
+   }
+  },
+  "fresh1": {
+   "neurons": 20234.18927669525,
+   "calls": 289,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 4648.026656150818,
+    "@cf/openai/gpt-oss-120b": 15586.162620544434
    }
   }
  },
- "usd": 1.2306,
+ "usd": 1.4736,
  "capUsd": 2.5
 }

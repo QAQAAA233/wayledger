@@ -1,0 +1,99 @@
+tag=fresh1 approaches=agent,baseline models=gemma,oss reps=3 scenarios=S25,S26,S27,S28,S29,S30,S31,S32 spent so far $1.251 of $2.5
+96 runs planned, 0 already on disk, 96 to do
+S27 agent    gemma  r1 PASS kind=executed calls=4 8885ms $0.00142
+S26 agent    gemma  r1 PASS kind=no_change calls=4 13828ms $0.00144
+S28 agent    gemma  r1 PASS kind=updated calls=4 20061ms $0.00154
+S25 agent    gemma  r1 PASS kind=proposed calls=7 23261ms $0.0026
+S29 agent    gemma  r1 PASS kind=proposed calls=5 15283ms $0.00154
+S30 agent    gemma  r1 PASS kind=executed calls=4 15594ms $0.00126
+S26 baseline gemma  r1 PASS kind=no_change calls=1 3389ms $0.00029
+S25 baseline gemma  r1 FAIL kind=stopped calls=1 9126ms $0.00032 failed: the plan the traveler is asked to confirm has no outdoor activity on the stormy day; the replacement is a real place from the search; it waits for the traveler as a proposal
+S32 agent    gemma  r1 PASS kind=executed calls=6 12846ms $0.00174
+S27 baseline gemma  r1 PASS kind=executed calls=1 3302ms $0.00029
+S30 baseline gemma  r1 PASS kind=executed calls=1 2404ms $0.00027
+S29 baseline gemma  r1 PASS kind=proposed calls=1 5502ms $0.00031
+S31 baseline gemma  r1 PASS kind=no_change calls=1 3194ms $0.00028
+S28 baseline gemma  r1 PASS kind=updated calls=1 9946ms $0.00031
+S32 baseline gemma  r1 FAIL kind=stopped calls=1 5984ms $0.00031 failed: the boat tour is removed; went through inside the signed limits
+S26 agent    oss    r1 PASS kind=no_change calls=2 6451ms $0.002
+S31 agent    gemma  r1 FAIL kind=executed calls=10 36323ms $0.00376 failed: the traveler only asked, so the plan is unchanged; no money moved
+S28 agent    oss    r1 PASS kind=updated calls=3 19912ms $0.0034
+S27 agent    oss    r1 PASS kind=executed calls=5 28432ms $0.00585
+S30 agent    oss    r1 PASS kind=executed calls=3 15511ms $0.00311
+S25 agent    oss    r1 FAIL kind=updated calls=7 45318ms $0.00892 failed: the replacement is a real place from the search; it waits for the traveler as a proposal
+S31 agent    oss    r1 PASS kind=asked calls=4 20014ms $0.00453
+S26 baseline oss    r1 PASS kind=no_change calls=1 5291ms $0.00112
+S25 baseline oss    r1 PASS kind=proposed calls=1 18275ms $0.00162
+S32 agent    oss    r1 PASS kind=executed calls=8 23384ms $0.00908
+S27 baseline oss    r1 PASS kind=executed calls=1 12828ms $0.00117
+S28 baseline oss    r1 PASS kind=updated calls=1 10858ms $0.00122
+S30 baseline oss    r1 PASS kind=executed calls=1 6009ms $0.00104
+S32 baseline oss    r1 PASS kind=executed calls=1 11154ms $0.00122
+S29 baseline oss    r1 PASS kind=proposed calls=1 25968ms $0.00167
+S29 agent    oss    r1 PASS kind=asked calls=6 80379ms $0.01276
+S31 baseline oss    r1 FAIL kind=executed calls=1 25059ms $0.00157 failed: the traveler only asked, so the plan is unchanged; no money moved
+S26 agent    gemma  r2 PASS kind=no_change calls=4 6763ms $0.00144
+S25 agent    gemma  r2 FAIL kind=asked calls=7 15215ms $0.00257 failed: the plan the traveler is asked to confirm has no outdoor activity on the stormy day; the replacement is a real place from the search; it waits for the traveler as a proposal
+S28 agent    gemma  r2 PASS kind=updated calls=3 10303ms $0.00088
+S30 agent    gemma  r2 PASS kind=executed calls=4 7218ms $0.0014
+S32 agent    gemma  r2 PASS kind=executed calls=6 12564ms $0.00173
+S31 agent    gemma  r2 PASS kind=asked calls=10 16339ms $0.00337
+S25 baseline gemma  r2 FAIL kind=stopped calls=1 1675ms $0.00032 failed: the plan the traveler is asked to confirm has no outdoor activity on the stormy day; the replacement is a real place from the search; it waits for the traveler as a proposal
+S26 baseline gemma  r2 PASS kind=no_change calls=1 3067ms $0.0003
+S27 baseline gemma  r2 PASS kind=executed calls=1 2943ms $0.00028
+S29 baseline gemma  r2 PASS kind=stopped calls=1 3466ms $0.0003
+S29 agent    gemma  r2 PASS kind=proposed calls=5 34195ms $0.00136
+S28 baseline gemma  r2 PASS kind=updated calls=1 5802ms $0.00031
+S30 baseline gemma  r2 PASS kind=executed calls=1 2691ms $0.00019
+S27 agent    gemma  r2 PASS kind=executed calls=5 41536ms $0.0018
+S32 baseline gemma  r2 FAIL kind=stopped calls=1 3117ms $0.00031 failed: the boat tour is removed; went through inside the signed limits
+S31 baseline gemma  r2 PASS kind=no_change calls=1 9662ms $0.00028
+S27 agent    oss    r2 FAIL kind=asked calls=2 9091ms $0.00217 failed: the Fado dinner is gone; a real park is on day 3 and costs nothing
+S26 agent    oss    r2 PASS kind=no_change calls=4 11389ms $0.00476
+S30 agent    oss    r2 PASS kind=executed calls=3 6916ms $0.00308
+S29 agent    oss    r2 PASS kind=asked calls=4 13179ms $0.00442
+S28 agent    oss    r2 PASS kind=updated calls=3 19408ms $0.00376
+S25 agent    oss    r2 FAIL kind=asked calls=6 30610ms $0.00765 failed: the plan the traveler is asked to confirm has no outdoor activity on the stormy day; the replacement is a real place from the search; it waits for the traveler as a proposal
+S26 baseline oss    r2 PASS kind=stopped calls=1 3482ms $0.001
+S27 baseline oss    r2 PASS kind=executed calls=1 7736ms $0.00116
+S25 baseline oss    r2 PASS kind=proposed calls=1 13913ms $0.00147
+S28 baseline oss    r2 PASS kind=updated calls=1 10788ms $0.00153
+S29 baseline oss    r2 PASS kind=asked calls=1 11620ms $0.00103
+S30 baseline oss    r2 PASS kind=executed calls=1 7236ms $0.00105
+S31 baseline oss    r2 FAIL kind=executed calls=1 10385ms $0.00165 failed: the traveler only asked, so the plan is unchanged; no money moved
+S32 baseline oss    r2 PASS kind=executed calls=1 14100ms $0.00132
+S25 agent    gemma  r3 PASS kind=proposed calls=7 13908ms $0.00247
+S26 agent    gemma  r3 PASS kind=no_change calls=4 7510ms $0.0013
+S27 agent    gemma  r3 PASS kind=executed calls=4 9134ms $0.00108
+S32 agent    oss    r2 FAIL kind=stopped calls=7 66520ms $0.00895 failed: the boat tour is removed; went through inside the signed limits
+S28 agent    gemma  r3 PASS kind=updated calls=4 10780ms $0.00141
+S29 agent    gemma  r3 PASS kind=proposed calls=5 7929ms $0.00168
+S30 agent    gemma  r3 PASS kind=executed calls=4 5579ms $0.00112
+S25 baseline gemma  r3 FAIL kind=stopped calls=1 5045ms $0.00032 failed: the plan the traveler is asked to confirm has no outdoor activity on the stormy day; the replacement is a real place from the search; it waits for the traveler as a proposal
+S32 agent    gemma  r3 PASS kind=executed calls=6 9534ms $0.00176
+S26 baseline gemma  r3 PASS kind=no_change calls=1 3367ms $0.00029
+S27 baseline gemma  r3 PASS kind=executed calls=1 4779ms $0.00029
+S28 baseline gemma  r3 PASS kind=updated calls=1 5230ms $0.0003
+S31 agent    oss    r2 PASS kind=no_change calls=6 92115ms $0.01244
+S30 baseline gemma  r3 PASS kind=executed calls=1 2527ms $0.00027
+S31 baseline gemma  r3 PASS kind=no_change calls=1 2523ms $0.0003
+S29 baseline gemma  r3 PASS kind=proposed calls=1 4690ms $0.00031
+S31 agent    gemma  r3 FAIL kind=executed calls=10 25691ms $0.0035 failed: the traveler only asked, so the plan is unchanged; no money moved
+S32 baseline gemma  r3 PASS kind=executed calls=1 5896ms $0.00022
+S26 agent    oss    r3 PASS kind=no_change calls=2 8631ms $0.00203
+S27 agent    oss    r3 FAIL kind=asked calls=4 16559ms $0.00447 failed: the Fado dinner is gone; a real park is on day 3 and costs nothing
+S30 agent    oss    r3 PASS kind=executed calls=3 8696ms $0.00306
+S29 agent    oss    r3 PASS kind=asked calls=4 25852ms $0.00484
+S28 agent    oss    r3 PASS kind=updated calls=3 35697ms $0.00379
+S25 agent    oss    r3 FAIL kind=updated calls=7 45917ms $0.00899 failed: the replacement is a real place from the search; it waits for the traveler as a proposal
+S25 baseline oss    r3 PASS kind=proposed calls=1 15269ms $0.00154
+S32 agent    oss    r3 PASS kind=executed calls=5 23775ms $0.00566
+S26 baseline oss    r3 PASS kind=no_change calls=1 13157ms $0.0011
+S27 baseline oss    r3 PASS kind=executed calls=1 11229ms $0.00119
+S31 agent    oss    r3 FAIL kind=executed calls=8 38874ms $0.01044 failed: the traveler only asked, so the plan is unchanged; no money moved
+S28 baseline oss    r3 FAIL kind=asked calls=1 17230ms $0.00144 failed: Dee is a traveler
+S30 baseline oss    r3 PASS kind=executed calls=1 13437ms $0.00096
+S29 baseline oss    r3 PASS kind=proposed calls=1 28552ms $0.00148
+S31 baseline oss    r3 FAIL kind=executed calls=1 24780ms $0.00144 failed: the traveler only asked, so the plan is unchanged; no money moved
+S32 baseline oss    r3 FAIL kind=asked calls=1 23491ms $0.00134 failed: the boat tour is removed; went through inside the signed limits
+done. spent so far $1.474 of $2.5
