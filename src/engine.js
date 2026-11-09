@@ -189,7 +189,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         p.status = 'stopped';
         p.error = 'PayPal no longer holds this money, so the steps that needed it could not run.';
         if (p.newPlan) s.plan = p.newPlan;
-        if (byMandate) s.mandate.uses.push({ proposalId: p.id, refundCents: refundedSoFar(), at: now() });
+        if (byMandate) s.mandate.uses = [...s.mandate.uses, { proposalId: p.id, refundCents: refundedSoFar(), at: now() }].slice(-50);
         s.activeProposal = null;
         return;
       }
@@ -201,7 +201,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     p.executedAt = now();
     if (p.newPlan) s.plan = p.newPlan;
     if (p.kind === 'close') s.closedAt = now();
-    if (byMandate) s.mandate.uses.push({ proposalId: p.id, refundCents: refundedSoFar(), at: now() });
+    if (byMandate) s.mandate.uses = [...s.mandate.uses, { proposalId: p.id, refundCents: refundedSoFar(), at: now() }].slice(-50);
     if (p.kind === 'checkout' && p.mandateTerms?.enabled && !s.mandate) {
       s.mandate = await createMandate({ tripId: s.id, terms: p.mandateTerms, baselineTotalCents: planTotalCents(s.plan), proposalId: p.id, now: now() });
       log(s, 'system', `You signed limits for the agent: ${describeTerms(s.mandate.terms)}`);
@@ -666,7 +666,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         policies: owner ? s.policies : s.policies.map((f) => ({ ...f, quote: null })),
         webhooks: owner ? s.webhooks.slice(-8) : [],
         runs: s.runs,
-        events: s.events,
+        events: owner ? s.events : s.events.map((e) => (e.kind === 'user' ? { ...e, text: 'The traveler wrote a message.' } : e)),
         holdLost: short.length ? { at: lostAt, short, cents: short.reduce((n, x) => n + x.cents, 0), canRehold: owner } : null,
       };
     },

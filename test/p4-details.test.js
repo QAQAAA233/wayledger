@@ -103,6 +103,8 @@ test('whoever has only the link sees the plan and the money, not the documents, 
   assert.ok(stranger.documents[0].chars > 0);
   assert.equal(stranger.policies[0].quote, null);
   assert.deepEqual(stranger.webhooks, []);
+  assert.equal(stranger.events.some((e) => e.kind === 'user' && /Lisbon|terms/i.test(e.text)), false, 'what the traveler typed stays with them');
+  assert.ok(owner.events.some((e) => e.kind === 'user' && /Lisbon/.test(e.text)));
   assert.ok(stranger.policies[0].itemTitle, 'but the fact that a rule was found is shown');
   const theirRun = (await trip.call('getRun', [started.v.runId], null)).v;
   assert.equal(JSON.stringify(theirRun).includes('free cancellation until 6 May'), false, 'the trail does not repeat the quoted sentence');
