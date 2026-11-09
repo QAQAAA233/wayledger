@@ -448,3 +448,22 @@ test('the card says what it does ("Hold the money with PayPal"), and the date th
     assert.match(await text(page, '.authority'), new RegExp(`Until ${expected}`), 'the form and the line below it name the same day');
   });
 });
+
+test('a step PayPal refuses is not a dead end: the card offers retry and "work out what is left again", and the second one gets the trip closed', { skip }, async () => {
+  const refuse = { on: false, [Symbol.match]: (s) => (refuse.on && /POST .*capture$/.test(s) ? [s] : null) }; // PayPal says no to charges while this is on
+  await withApp({ failOn: refuse }, async (page) => {
+    await booked(page);
+    refuse.on = true;
+    await page.click('[data-act="close"]');
+    await page.waitForSelector('[data-act="confirm"]');
+    await page.click('[data-act="confirm"]');
+    await page.waitForSelector('[data-act="refresh-failed"]', { timeout: 8000 });
+    assert.notEqual(await page.$('[data-act="retry-proposal"]'), null, 'retrying is still offered');
+    assert.match(await text(page, 'section.card[style*="danger"]'), /One step did not go through/);
+    await page.click('[data-act="refresh-failed"]');
+    await page.waitForFunction(() => !document.querySelector('[data-act="refresh-failed"]') && document.querySelector('[data-act="confirm"]'), { timeout: 8000 });
+    refuse.on = false; // PayPal answers again
+    await page.click('[data-act="confirm"]');
+    await page.waitForSelector('.notice.closed', { timeout: 8000 });
+  });
+});
