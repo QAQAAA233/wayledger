@@ -1,3 +1,4 @@
+import { chargesNow } from './delta.js';
 // Words for the traveler, written by code from plan differences and money actions. A model never writes these:
 // what a proposal says it does is what it does. No internal terms (quota, reserve, cap) appear in any of it.
 const usd = (c) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -42,7 +43,7 @@ export function describeAction(a) {
 // What really happens at PayPal. Setting money aside inside a hold and freeing it again never touch PayPal.
 export function paypalEffect(actions) {
   const sum = (f) => actions.filter(f).reduce((s, a) => s + a.cents, 0);
-  const chargeCents = sum((a) => a.type === 'capture' || (a.type === 'hold' && a.captureAfter));
+  const chargeCents = sum(chargesNow);
   const holdCents = sum((a) => a.type === 'hold' && !a.captureAfter);
   const refundCents = sum((a) => a.type === 'refund');
   const voidCents = sum((a) => a.type === 'void');
@@ -50,6 +51,7 @@ export function paypalEffect(actions) {
 }
 
 export function describeEffect(actions) {
+  if (actions.length === 0) return 'No money moves.';
   const e = paypalEffect(actions);
   if (!e.touchesPayPal) return 'This change stays inside your trip hold. PayPal does not move until you close the trip.';
   const parts = [];

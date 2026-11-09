@@ -111,6 +111,22 @@ export function applyChange(plan, change) {
 
 export const planTotalCents = (plan) => plan.items.reduce((a, b) => a + b.amountCents, 0);
 
+// Does a change decide who owes what? Who is on the trip, who shares an existing item, or an added item shared by fewer
+// people than the whole trip (unless it takes the place of an item shared the same way). The agent never decides this
+// alone: it is the one thing that moves money between friends.
+const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+export function splitChanged(oldPlan, newPlan) {
+  if (!sameSet(oldPlan.travelers, newPlan.travelers)) return true;
+  const oldById = new Map(oldPlan.items.map((i) => [i.id, i]));
+  const removed = oldPlan.items.filter((i) => !newPlan.items.some((n) => n.id === i.id));
+  for (const n of newPlan.items) {
+    const o = oldById.get(n.id);
+    if (o) { if (!sameSet(o.participants, n.participants)) return true; }
+    else if (!sameSet(n.participants, newPlan.travelers) && !removed.some((r) => sameSet(r.participants, n.participants))) return true;
+  }
+  return false;
+}
+
 export function perPersonCents(plan) {
   const out = Object.fromEntries(plan.travelers.map((t) => [t, 0]));
   for (const it of plan.items) {

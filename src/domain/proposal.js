@@ -1,4 +1,4 @@
-import { netCents } from './delta.js';
+import { netCents, chargesNow } from './delta.js';
 import { sha256Hex } from './hash.js';
 import { MANDATE_ACTIONS, mandateIntact } from './mandate.js';
 
@@ -24,7 +24,8 @@ const canonical = (p) => JSON.stringify({
 // `summary` is written by code from the actions. `agentNote` is what the model said; it is shown apart, labelled,
 // and is not part of what anyone confirms.
 export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, agentNote, source, now, ttlMs = PROPOSAL_TTL_MS }) {
-  if (actions.length === 0) throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
+  // A change of the plan that moves no money is still a proposal: a person confirms it, or the signed limits do.
+  if (actions.length === 0 && !newPlan && kind !== 'close') throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
   const proposal = {
     id, tripId, kind, summary,
     actions,
@@ -91,6 +92,7 @@ export async function assertMayMove(proposal, action, movedSoFarCents, now, ctx 
     if (!m || m.digest !== proposal.confirmation.mandateDigest || !(await mandateIntact(m))) throw new MoneyGuardError('MANDATE_TAMPERED', 'The signed limits no longer match.');
     if (now >= m.terms.validUntil) throw new MoneyGuardError('MANDATE_EXPIRED', 'The signed limits ran out.');
     if (!MANDATE_ACTIONS.includes(action.type)) throw new MoneyGuardError('OUTSIDE_MANDATE', 'The signed limits do not cover this kind of action.');
+    if (chargesNow(action)) throw new MoneyGuardError('OUTSIDE_MANDATE', 'The signed limits do not cover charging money; only a person can say yes to a charge.');
     if (action.type === 'refund' && m.used.refundCents + (ctx.refundedSoFarCents ?? 0) + action.cents > m.terms.refundCapCents) {
       throw new MoneyGuardError('OUTSIDE_MANDATE', 'This would exceed the refund limit you signed.');
     }

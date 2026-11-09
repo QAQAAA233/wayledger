@@ -9,6 +9,8 @@ const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, 
 // every answer by copying one of these and changing the ids, amounts and statuses, so the shapes are PayPal's own.
 const SANDBOX_ORDER = fixture('sandbox_create_order.json');
 const SANDBOX = fixture('sandbox_resources.json');
+// What PayPal answers when something is asked of an authorization that was voided from outside (read from the sandbox).
+const VOIDED = fixture('sandbox_voided.json');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const cents = (s) => Math.round(Number(s) * 100);
 export { cents };
@@ -73,13 +75,24 @@ export function fakePayPalFetch({ skew = {}, failOn = null, now = () => Date.now
     }
     if ((m = path.match(/^\/v2\/payments\/authorizations\/(\w+)$/)) && method === 'GET') return res(200, authBody(auths.get(m[1])));
     if ((m = path.match(/^\/v2\/payments\/authorizations\/(\w+)\/capture$/))) {
-      const a = auths.get(m[1]); const id = `CAP${++n}`;
+      const a = auths.get(m[1]);
+      if (a.status === 'VOIDED') {
+        // an expired hold answers with PayPal's documented expiry error (Payments v2 OpenAPI, capture 422 example); a voided one with the real sandbox answer
+        const body = clone(VOIDED.capture_on_voided.body);
+        if (a.expired) body.details = [{ issue: 'AUTHORIZATION_EXPIRED', description: 'The authorization has expired.' }];
+        return res(VOIDED.capture_on_voided.status, body);
+      }
+      const id = `CAP${++n}`;
       caps.set(id, { id, status: 'COMPLETED', amount: body.amount, authId: a.id, customId: a.customId });
       a.captured = (a.captured ?? 0) + Math.round(Number(body.amount.value) * 100);
       a.status = a.captured >= Math.round(Number(a.amount.value) * 100) ? 'CAPTURED' : 'PARTIALLY_CAPTURED';
       return res(201, { id, status: 'COMPLETED' });
     }
-    if ((m = path.match(/^\/v2\/payments\/authorizations\/(\w+)\/void$/))) { auths.get(m[1]).status = 'VOIDED'; return res(204, null); }
+    if ((m = path.match(/^\/v2\/payments\/authorizations\/(\w+)\/void$/))) {
+      if (auths.get(m[1]).status === 'VOIDED') return res(VOIDED.void_on_voided.status, clone(VOIDED.void_on_voided.body));
+      auths.get(m[1]).status = 'VOIDED';
+      return res(204, null);
+    }
     if ((m = path.match(/^\/v2\/payments\/captures\/(\w+)$/)) && method === 'GET') return res(200, capBody(caps.get(m[1])));
     if ((m = path.match(/^\/v2\/payments\/captures\/(\w+)\/refund$/))) {
       const cap = caps.get(m[1]);
@@ -96,7 +109,10 @@ export function fakePayPalFetch({ skew = {}, failOn = null, now = () => Date.now
     if ((m = path.match(/^\/v2\/payments\/refunds\/(\w+)$/))) return res(200, refBody(refs.get(m[1])));
     return res(404, { name: 'NOT_FOUND', message: `no route ${method} ${path}` });
   };
-  return { fetchImpl, calls, auths, caps, refs, orders };
+  // Something that happens at PayPal without Wayledger: someone voids the hold in PayPal, or it runs out after 29 days.
+  const voidOutside = (authId) => { auths.get(authId).status = 'VOIDED'; };
+  const expire = (authId) => { Object.assign(auths.get(authId), { status: 'VOIDED', expired: true }); };
+  return { fetchImpl, calls, auths, caps, refs, orders, voidOutside, expire };
 }
 
 export const SAMPLE_PLAN = {

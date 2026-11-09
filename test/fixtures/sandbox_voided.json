@@ -1,0 +1,128 @@
+{
+ "capturedAt": "2026-11-10T01:20:00Z",
+ "note": "Real PayPal sandbox responses for an authorization that was voided from outside Wayledger (the second attack round did it): read it, capture on it, void it again, reauthorize it. Read with scratchpad probe, buyer and merchant emails removed.",
+ "samples": {
+  "get_voided_authorization": {
+   "status": 200,
+   "body": {
+    "id": "6V880151WV936122P",
+    "status": "VOIDED",
+    "amount": {
+     "currency_code": "USD",
+     "value": "1500.00"
+    },
+    "custom_id": "40cecd5592fdf4f5875a4005",
+    "seller_protection": {
+     "status": "ELIGIBLE",
+     "dispute_categories": [
+      "ITEM_NOT_RECEIVED",
+      "UNAUTHORIZED_TRANSACTION"
+     ]
+    },
+    "supplementary_data": {
+     "related_ids": {
+      "order_id": "4AU05710DM251201F"
+     }
+    },
+    "payee": {
+     "email_address": "[removed]",
+     "merchant_id": "C6QH58LLTJHZW"
+    },
+    "expiration_time": "2026-12-08T13:58:18Z",
+    "create_time": "2026-11-09T13:58:18Z",
+    "update_time": "2026-11-09T14:03:55Z",
+    "links": [
+     {
+      "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/6V880151WV936122P",
+      "rel": "self",
+      "method": "GET"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/6V880151WV936122P/capture",
+      "rel": "capture",
+      "method": "POST"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/6V880151WV936122P/void",
+      "rel": "void",
+      "method": "POST"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/payments/authorizations/6V880151WV936122P/reauthorize",
+      "rel": "reauthorize",
+      "method": "POST"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/4AU05710DM251201F",
+      "rel": "up",
+      "method": "GET"
+     }
+    ]
+   }
+  },
+  "capture_on_voided": {
+   "status": 422,
+   "body": {
+    "name": "UNPROCESSABLE_ENTITY",
+    "message": "The requested action could not be performed, semantically incorrect, or failed business validation.",
+    "debug_id": "ca57e5d319da1",
+    "details": [
+     {
+      "issue": "AUTHORIZATION_VOIDED",
+      "description": "Authorization has been voided."
+     }
+    ],
+    "links": [
+     {
+      "href": "https://developer.paypal.com/docs/api/payments/v2/#error-AUTHORIZATION_VOIDED",
+      "rel": "information_link",
+      "encType": "application/json"
+     }
+    ]
+   }
+  },
+  "void_on_voided": {
+   "status": 422,
+   "body": {
+    "name": "UNPROCESSABLE_ENTITY",
+    "message": "The requested action could not be performed, semantically incorrect, or failed business validation.",
+    "debug_id": "ca57e5d366cd6",
+    "details": [
+     {
+      "issue": "PREVIOUSLY_VOIDED",
+      "field": "authorization_id",
+      "value": "6V880151WV936122P",
+      "description": "Authorization has been previously voided and hence cannot be voided again.",
+      "location": "path"
+     }
+    ],
+    "links": [
+     {
+      "href": "https://developer.paypal.com/docs/api/payments/v2/#error-PREVIOUSLY_VOIDED",
+      "rel": "information_link"
+     }
+    ]
+   }
+  },
+  "reauthorize_on_voided": {
+   "status": 422,
+   "body": {
+    "name": "UNPROCESSABLE_ENTITY",
+    "message": "The requested action could not be performed, semantically incorrect, or failed business validation.",
+    "debug_id": "ca57e5d408b4e",
+    "details": [
+     {
+      "issue": "REAUTHORIZATION_TOO_SOON",
+      "description": "A reauthorization is only allowed once from Day 4 to Day 29 since the date of the original authorization."
+     }
+    ],
+    "links": [
+     {
+      "href": "https://developer.paypal.com/docs/api/payments/v2/#error-REAUTHORIZATION_TOO_SOON",
+      "rel": "information_link"
+     }
+    ]
+   }
+  }
+ }
+}

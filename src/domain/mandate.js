@@ -1,4 +1,5 @@
 import { sha256Hex } from './hash.js';
+import { chargesNow } from './delta.js';
 
 // The mandate: limits the person signs once, with their first PayPal approval, inside which the agent may change the
 // plan and move money on its own. Everything here is decided by code from numbers; the model can read the limits and
@@ -53,7 +54,7 @@ export async function mandateIntact(m) {
 // Is this change inside the signed limits? `facts` come from the engine, never from the model:
 //   actions, humanOnly (the change touches the budget), planAfterTotalCents, now, operatorLossCents (what the terms say the
 //   operator would keep)
-export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now, operatorLossCents = 0 }) {
+export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now, operatorLossCents = 0, splitChanged = false }) {
   const reasons = [];
   const refundCents = actions.filter((a) => a.type === 'refund').reduce((s, a) => s + a.cents, 0);
   const planIncreaseCents = mandate ? planAfterTotalCents - mandate.baselineTotalCents : 0;
@@ -74,6 +75,11 @@ export function evaluateMandate(mandate, { actions, humanOnly = false, planAfter
   }
   if (actions.some((a) => a.type === 'hold')) reasons.push({ code: 'NEEDS_PAYPAL_APPROVAL', text: 'This needs a new PayPal hold, and only you can approve that in PayPal.' });
   if (actions.some((a) => !MANDATE_ACTIONS.includes(a.type) && a.type !== 'hold')) reasons.push({ code: 'SETTLEMENT_IS_YOURS', text: 'Charging or releasing the trip hold at the end is always your decision.' });
+  // a charge that no other reason already covers: a capture is settlement, a hold is a new PayPal approval; what is left
+  // is setting money aside for something paid in advance, which charges it on the spot
+  const charging = actions.filter((a) => chargesNow(a) && a.type === 'allocate');
+  if (charging.length) reasons.push({ code: 'CHARGE_IS_YOURS', text: `This would charge ${dollars(charging.reduce((s, a) => s + a.cents, 0))} of your money now, and only you can say yes to a charge.` });
+  if (splitChanged) reasons.push({ code: 'SPLIT_IS_YOURS', text: 'This changes who is on the trip or who shares an item, so it needs your OK.' });
   if (humanOnly) reasons.push({ code: 'BUDGET_IS_YOURS', text: 'Only you can change your budget.' });
   if (operatorLossCents > 0) reasons.push({ code: 'LOSS_TO_OPERATOR', text: `By your terms this would cost you ${dollars(operatorLossCents)} that the operator keeps, so it needs your OK.` });
   return { within: reasons.length === 0, reasons, refundCents, planIncreaseCents, remaining };

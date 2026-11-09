@@ -124,7 +124,7 @@ test('a choice that needs a new PayPal hold is never the agent\'s to make, even 
 });
 
 test('inside the buffer an added item needs no PayPal call at all: the money was already held', async () => {
-  const edit = { add: [{ day: 3, title: 'Sintra lunch', category: 'food', amount: 100, amountBasis: 'user_given', participants: ['Ana'] }] };
+  const edit = { add: [{ day: 3, title: 'Sintra lunch', category: 'food', amount: 100, amountBasis: 'user_given' }] };
   const wd = await world({ run: scriptedModel([{ calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Lunch added.', reason: 'You asked.' })] }]), terms: TERMS_OK });
   const before = moneyCalls(wd).length;
   const run = await startRun(wd, 'Add Sintra lunch for $100.');

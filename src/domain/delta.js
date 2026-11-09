@@ -12,6 +12,11 @@ import { itemState, reserves } from './ledger.js';
 // - 'refund': refund a charged amount in PayPal
 export const PAYPAL_CHARGE_TYPES = ['hold', 'capture', 'refund'];
 
+// Does this action take money out of the buyer's account right now? A capture does, and so does setting money aside
+// for something paid in advance (the item is charged the moment it is set aside). One rule, used wherever the effect
+// of an action is told, judged or gated.
+export const chargesNow = (a) => a.type === 'capture' || ((a.type === 'hold' || a.type === 'allocate') && Boolean(a.captureAfter));
+
 export function diffToActions(oldPlan, newPlan, ledger) {
   const actions = [];
   const oldById = new Map(oldPlan.items.map((i) => [i.id, i]));

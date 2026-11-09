@@ -1,4 +1,4 @@
-import { normalizePlan, applyChange, planTotalCents, perPersonCents, PlanError, HUMAN_ONLY_OPS, isIsoDate, addDays, tripEndDate, dayDate } from './domain/plan.js';
+import { normalizePlan, applyChange, planTotalCents, perPersonCents, splitChanged, PlanError, HUMAN_ONLY_OPS, isIsoDate, addDays, tripEndDate, dayDate } from './domain/plan.js';
 import { diffToActions, checkoutActions, closeActions, BUFFER_ID } from './domain/delta.js';
 import { appendFact, itemState, reserves, ledgerTotals, reconcile } from './domain/ledger.js';
 import { createProposal, confirmProposal, confirmByMandate, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
@@ -218,12 +218,10 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     return { ...plan, title: isLeak(plan.title) ? `Trip to ${plan.destination || 'your destination'}` : plan.title };
   };
 
-  // What a plan edit would do, worked out without changing anything. Used by the agent to compare options and by
-  // submitEdit, so what the agent was shown is what the engine does.
-  function simulate(s, ops) {
-    let newPlan;
-    try { newPlan = applyChange(s.plan, { operations: ops }); } catch (e) { return { ok: false, error: e.message }; }
-    const humanOnly = ops.some((o) => HUMAN_ONLY_OPS.includes(o.op));
+  // What it would mean to turn the plan into `newPlan`, worked out without changing anything: the money actions, what the
+  // terms say it costs at the operator, and whether the signed limits cover it. One road for everything that changes a
+  // plan: the agent comparing options, submitEdit, and a refreshed proposal.
+  function assess(s, newPlan, { humanOnly = false } = {}) {
     const booked = s.ledger.length > 0;
     const actions = booked ? diffToActions(s.plan, newPlan, s.ledger) : [];
     const losses = [];
@@ -242,13 +240,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       else if (n.amountCents < it.amountCents) lose(it, n.amountCents);
     }
     const operatorLossCents = losses.reduce((n, l) => n + (l.lossCents ?? 0), 0);
-    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now(), operatorLossCents });
+    const split = splitChanged(s.plan, newPlan);
+    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now(), operatorLossCents, splitChanged: split });
     const effect = paypalEffect(actions);
     const holds = reserves(s.ledger).filter((r) => r.open);
     const expiring = holds.filter((r) => r.expiresAt).map((r) => r.expiresAt).sort()[0] ?? null;
     const endsOn = tripEndDate(newPlan);
     return {
-      ok: true,
       newPlan,
       actions,
       booked,
@@ -262,6 +260,16 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       holdOutlastsTrip: expiring && endsOn ? Date.parse(expiring) >= Date.parse(`${endsOn}T23:59:59Z`) : null,
     };
   }
+
+  // What a plan edit would do. Used by the agent to compare options and by submitEdit, so what the agent was shown is
+  // what the engine does.
+  function simulate(s, ops) {
+    let newPlan;
+    try { newPlan = applyChange(s.plan, { operations: ops }); } catch (e) { return { ok: false, error: e.message }; }
+    return { ok: true, ...assess(s, newPlan, { humanOnly: ops.some((o) => HUMAN_ONLY_OPS.includes(o.op)) }) };
+  }
+
+  const lossLinesOf = (losses) => losses.filter((l) => l.lossCents > 0).map((l) => ({ title: l.title, lossCents: l.lossCents, why: l.why, quote: l.quote }));
 
   const publicProposal = (s, p, owner) => {
     if (!p) return null;
@@ -380,34 +388,29 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       const unread = sim.losses.filter((l) => l.unchecked).map((l) => l.title);
       if (unread.length) throw new UserFacingError(`The traveler pasted booking terms, but nothing is recorded about ${unread.join(', ')}. Read them with read_documents and record what they say with record_policy (none: true if no sentence mentions the item), then submit again.`, 'TERMS_UNREAD');
       const source = { type: 'agent', runId };
-      const lossLines = sim.losses.filter((l) => l.lossCents > 0).map((l) => ({ title: l.title, lossCents: l.lossCents, why: l.why, quote: l.quote }));
+      const lossLines = lossLinesOf(sim.losses);
       if (agentNote) log(s, 'agent', String(agentNote).slice(0, 400));
       const summary = proposalSummary('change', s.plan, sim.newPlan);
+      // Before the first approval nothing is signed and no money exists: the person's own words change the draft.
       if (!sim.booked) {
         s.plan = sim.newPlan;
         await refreshCheckout(s);
         await store.put(s);
         return { outcome: 'updated', money: false, summary };
       }
-      if (sim.actions.length === 0) {
-        s.plan = sim.newPlan;
-        s.activeProposal = null;
-        log(s, 'system', `Plan updated. ${summary} No money moves.`);
-        await store.put(s);
-        return { outcome: 'updated', money: false, summary };
-      }
+      // After it, every change is a proposal, also one that moves no money: the signed limits confirm it, or a person does.
       const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
       if (sim.mandate.within) {
         await confirmByMandate(p, s.mandate, sim.mandate, now());
         log(s, 'system', `Inside the limits you signed, so the agent went ahead: ${summary}`);
         await execute(s, p);
         await store.put(s);
-        return { outcome: p.status === 'executed' ? 'executed' : 'failed', proposalId: p.id, money: true, summary, effect: sim.effect, error: p.error, mandate: sim.mandate };
+        return { outcome: p.status === 'executed' ? 'executed' : 'failed', proposalId: p.id, money: sim.actions.length > 0, summary, effect: sim.effect, error: p.error, mandate: sim.mandate };
       }
       log(s, 'system', `This needs your OK: ${sim.mandate.reasons.map((r) => r.text).join(' ')}`);
       p.outside = sim.mandate.reasons;
       await store.put(s);
-      return { outcome: 'proposed', proposalId: p.id, money: true, summary, effect: sim.effect, mandate: sim.mandate };
+      return { outcome: 'proposed', proposalId: p.id, money: sim.actions.length > 0, summary, effect: sim.effect, mandate: sim.mandate };
     },
 
     async closeTrip() {
@@ -435,9 +438,12 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (p.kind === 'checkout') await refreshCheckout(s);
       else if (p.kind === 'close') await proposeClose(s);
       else {
-        const actions = diffToActions(s.plan, p.newPlan, s.ledger);
-        if (actions.length === 0) { s.plan = p.newPlan; s.activeProposal = null; log(s, 'system', 'Plan updated. No money moves.'); }
-        else await fresh(s, 'change', proposalSummary('change', s.plan, p.newPlan), actions, p.newPlan, { agentNote: p.agentNote, source: p.source });
+        // Worked out again from the plan and the ledger as they are now, with the same checks as the first time. A refresh
+        // is not a yes: the new proposal waits for the person (or the signed limits do not apply to it at all).
+        const a = assess(s, p.newPlan);
+        const lossLines = lossLinesOf(a.losses);
+        const np = await fresh(s, 'change', proposalSummary('change', s.plan, p.newPlan), a.actions, p.newPlan, { agentNote: p.agentNote, source: p.source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
+        np.outside = a.mandate.reasons;
       }
       log(s, 'system', 'Amounts were worked out again from the current trip. Nothing was sent to the model.');
       await store.put(s);
