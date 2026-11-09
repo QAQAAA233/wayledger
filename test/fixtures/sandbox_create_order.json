@@ -1,0 +1,57 @@
+{
+ "capturedAt": "2026-11-09T10:07:12.701Z",
+ "note": "Real PayPal sandbox responses to POST /v2/checkout/orders; the test fake mirrors these shapes.",
+ "samples": {
+  "create_order_paypal_source": {
+   "status": 200,
+   "body": {
+    "id": "2YY08688SB170672R",
+    "status": "PAYER_ACTION_REQUIRED",
+    "payment_source": {
+     "paypal": {}
+    },
+    "links": [
+     {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/2YY08688SB170672R",
+      "rel": "self",
+      "method": "GET"
+     },
+     {
+      "href": "https://www.sandbox.paypal.com/checkoutnow?token=2YY08688SB170672R",
+      "rel": "payer-action",
+      "method": "GET"
+     }
+    ]
+   }
+  },
+  "create_order_card_source": {
+   "status": 201,
+   "body": {
+    "id": "9DX52109SD552261H",
+    "status": "CREATED",
+    "links": [
+     {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/9DX52109SD552261H",
+      "rel": "self",
+      "method": "GET"
+     },
+     {
+      "href": "https://www.sandbox.paypal.com/checkoutnow?token=9DX52109SD552261H",
+      "rel": "approve",
+      "method": "GET"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/9DX52109SD552261H",
+      "rel": "update",
+      "method": "PATCH"
+     },
+     {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/9DX52109SD552261H/authorize",
+      "rel": "authorize",
+      "method": "POST"
+     }
+    ]
+   }
+  }
+ }
+}

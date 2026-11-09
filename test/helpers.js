@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs';
 import { createEngine } from '../src/engine.js';
+import { createTripRunner } from '../src/trip-runner.js';
+import { takeQuota } from '../src/quota.js';
 import { fromCents } from '../src/domain/money.js';
+
+// Real PayPal sandbox responses to POST /v2/checkout/orders, captured with test/fixtures (see the file's note).
+const SANDBOX_ORDER = JSON.parse(readFileSync(new URL('./fixtures/sandbox_create_order.json', import.meta.url), 'utf8')).samples;
 
 // A stand-in for PayPal that behaves like the REST API at the HTTP layer, used only by tests.
 // `skew` lets a test make PayPal answer with a different amount than we asked for.
@@ -18,7 +24,10 @@ export function fakePayPalFetch({ skew = {}, failOn = null } = {}) {
       if (body.intent === 'AUTHORIZE' && (body.purchase_units?.length ?? 0) !== 1) {
         return res(422, { name: 'UNPROCESSABLE_ENTITY', message: 'UNSUPPORTED_INTENT', details: [{ issue: 'UNSUPPORTED_INTENT' }] });
       }
-      const id = `ORDER${++n}`; orders.set(id, body); return res(201, { id, status: 'CREATED' });
+      const id = `ORDER${++n}`; orders.set(id, body);
+      // PayPal answers a wallet order with 200 PAYER_ACTION_REQUIRED + a payer-action link, other orders with 201 CREATED.
+      const sample = body.payment_source?.paypal ? SANDBOX_ORDER.create_order_paypal_source : SANDBOX_ORDER.create_order_card_source;
+      return res(sample.status, { ...sample.body, id });
     }
     let m;
     if ((m = path.match(/^\/v2\/checkout\/orders\/(\w+)$/)) && method === 'GET') {
@@ -59,7 +68,7 @@ export function fakePayPalFetch({ skew = {}, failOn = null } = {}) {
     if ((m = path.match(/^\/v2\/payments\/refunds\/(\w+)$/))) return res(200, refs.get(m[1]));
     return res(404, { name: 'NOT_FOUND', message: `no route ${method} ${path}` });
   };
-  return { fetchImpl, calls, auths, caps, refs };
+  return { fetchImpl, calls, auths, caps, refs, orders };
 }
 
 export const SAMPLE_PLAN = {
@@ -84,3 +93,27 @@ export function makeEngine({ ai, paypal, clock = { t: 1_000_000 } }) {
 
 export const cents = (s) => Math.round(Number(s) * 100);
 export { fromCents };
+
+// An in-memory stand-in for the Worker environment: a Durable Object namespace per kind, backed by the
+// real trip runner, so route and browser tests exercise the real routing, engine and ledger.
+export function fakeEnv({ ai, paypal, now = () => Date.now(), ttlMs, vars = {} } = {}) {
+  const runners = new Map();
+  const memory = () => {
+    const mem = new Map();
+    return { mem, storage: { get: async (k) => (mem.has(k) ? structuredClone(mem.get(k)) : undefined), put: async (k, v) => { mem.set(k, structuredClone(v)); } } };
+  };
+  const quota = memory();
+  const runnerFor = (id) => {
+    if (!runners.has(id)) runners.set(id, createTripRunner({ storage: memory().storage, paypal, ai, now, ttlMs }));
+    return runners.get(id);
+  };
+  return {
+    env: {
+      PAYPAL_CLIENT_ID: 'test-client-id',
+      ...vars,
+      TRIP: { idFromName: (name) => name, get: (id) => ({ call: (method, args) => runnerFor(id).call(method, args) }) },
+      QUOTA: { idFromName: (name) => name, get: () => ({ take: (key, limit, windowMs) => takeQuota(quota.storage, key, limit, windowMs) }) },
+    },
+    quota: quota.mem,
+  };
+}

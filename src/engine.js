@@ -1,7 +1,7 @@
 import { normalizePlan, applyChange, planTotalCents, perPersonCents, PlanError } from './domain/plan.js';
 import { diffToActions, checkoutActions, closeActions } from './domain/delta.js';
 import { appendFact, itemState, reserves, ledgerTotals, reconcile } from './domain/ledger.js';
-import { createProposal, confirmProposal, assertMayMove, MoneyGuardError } from './domain/proposal.js';
+import { createProposal, confirmProposal, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
 
 // One trip = one object = one truth. `store` holds a single JSON state; `paypal` and `ai`
 // are injected so the same rules run in the Durable Object and in the permanent tests.
@@ -11,7 +11,7 @@ export class UserFacingError extends Error {
 
 const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
-export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
+export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs = PROPOSAL_TTL_MS }) {
   const log = (s, kind, text) => { s.events.push({ at: now(), kind, text }); if (s.events.length > 60) s.events.shift(); };
 
   const asUserError = (e) => {
@@ -19,9 +19,9 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
     return e;
   };
 
-  async function fresh(s, kind, summary, actions, newPlan) {
+  async function fresh(s, kind, summary, actions, newPlan, unfunded) {
     for (const p of Object.values(s.proposals)) if (p.status === 'pending') p.status = 'superseded';
-    const p = await createProposal({ id: uid(), tripId: s.id, kind, summary, actions, newPlan, now: now() });
+    const p = await createProposal({ id: uid(), tripId: s.id, kind, summary, actions, newPlan, unfunded, now: now(), ttlMs });
     s.proposals[p.id] = p;
     s.activeProposal = p.id;
     return p;
@@ -31,6 +31,24 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
     const actions = checkoutActions(s.plan, s.ledger);
     if (actions.length === 0) { s.activeProposal = null; return null; }
     return fresh(s, 'checkout', summary, actions, null);
+  }
+
+  // Plan items that were never funded by PayPal. Closing the trip settles money; it cannot settle these.
+  const unfundedItems = (s) => s.plan.items
+    .filter((i) => itemState(s.ledger, i.id).status === 'planned')
+    .map((i) => ({ itemId: i.id, title: i.title, cents: i.amountCents }));
+
+  async function proposeClose(s) {
+    const actions = closeActions(s.plan, s.ledger);
+    const unfunded = unfundedItems(s);
+    if (actions.length === 0) {
+      s.closedAt = now();
+      s.activeProposal = null;
+      log(s, 'system', unfunded.length ? `Trip closed. Nothing was left to settle. Never booked: ${unfunded.map((u) => u.title).join(', ')}.` : 'Trip closed. Nothing was left to settle.');
+      return null;
+    }
+    const summary = 'Close trip: capture all held items and void any unused trip reserve in PayPal.';
+    return fresh(s, 'close', summary, actions, null, unfunded.length ? unfunded : undefined);
   }
 
   async function execute(s, p) {
@@ -105,15 +123,39 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
     p.status = 'executed';
     p.executedAt = now();
     if (p.newPlan) s.plan = p.newPlan;
+    if (p.kind === 'close') s.closedAt = now();
     s.activeProposal = null;
     log(s, 'system', `Done: ${p.summary}`);
   }
 
+  // The gate in front of every PayPal authorization: placing a hold moves money, so it needs the same
+  // proof as a capture or a refund (confirmed, untouched, unexpired, in the proposal, under the cap).
+  // A confirmed proposal that ran out of time before the buyer approved is marked expired and never authorized.
+  async function assertHoldsMayMove(s, p) {
+    const holds = p.actions.filter((a) => a.type === 'hold');
+    try {
+      for (const [i, h] of holds.entries()) await assertMayMove(p, h, holds.slice(0, i).reduce((a, x) => a + x.cents, 0), now());
+    } catch (e) {
+      if (e.code === 'EXPIRED' && p.status === 'confirmed') {
+        p.status = 'expired';
+        log(s, 'error', 'The confirmation expired before PayPal approval. Nothing was authorized.');
+        await store.put(s);
+      }
+      throw asUserError(e);
+    }
+    return holds;
+  }
+
   async function load() { return store.get(); }
+
+  const mustBeOpen = (s) => {
+    if (!s?.plan) throw new UserFacingError('Trip not found.', 'NOT_FOUND');
+    if (s.closedAt) throw new UserFacingError('This trip is closed. Start a new trip to plan something else.', 'TRIP_CLOSED');
+  };
 
   return {
     async createTrip(id, prompt) {
-      const s = { id, createdAt: now(), plan: null, ledger: [], proposals: {}, activeProposal: null, events: [] };
+      const s = { id, createdAt: now(), closedAt: null, plan: null, ledger: [], proposals: {}, activeProposal: null, events: [] };
       log(s, 'user', prompt);
       try {
         s.plan = await ai.planTrip(prompt, (raw) => normalizePlan(raw));
@@ -128,7 +170,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
 
     async requestChange(text) {
       const s = await load();
-      if (!s?.plan) throw new UserFacingError('Trip not found.', 'NOT_FOUND');
+      mustBeOpen(s);
       log(s, 'user', text);
       let result;
       try {
@@ -154,13 +196,34 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
 
     async closeTrip() {
       const s = await load();
-      if (!s?.plan) throw new UserFacingError('Trip not found.', 'NOT_FOUND');
-      const actions = closeActions(s.plan, s.ledger);
-      if (actions.length === 0) throw new UserFacingError('Nothing left to settle or void — this trip is already closed.', 'NOTHING_TO_CLOSE');
-      const summary = 'Close trip: capture all held items and void any unused trip reserve in PayPal.';
+      mustBeOpen(s);
+      if (s.ledger.length === 0) throw new UserFacingError('Nothing to close yet: this trip has not been booked.', 'NOTHING_TO_CLOSE');
       log(s, 'user', 'Close trip and settle remaining holds.');
-      log(s, 'agent', summary);
-      await fresh(s, 'close', summary, actions, null);
+      const p = await proposeClose(s);
+      if (p) log(s, 'agent', p.summary);
+      await store.put(s);
+      return s;
+    },
+
+    // The same money difference, worked out again from the plan and the ledger as they are now. No model
+    // call: this is the way out of an expired proposal. It only applies to a proposal nothing has run for.
+    async refreshProposal(proposalId) {
+      const s = await load();
+      mustBeOpen(s);
+      const p = s.proposals[proposalId];
+      if (!p) throw new UserFacingError('Proposal not found.', 'NOT_FOUND');
+      if (s.activeProposal !== p.id || !['pending', 'confirmed', 'expired'].includes(p.status) || p.results.length > 0) {
+        throw new UserFacingError('This proposal cannot be refreshed.', 'NOT_REFRESHABLE');
+      }
+      p.status = 'superseded';
+      if (p.kind === 'checkout') await refreshCheckout(s, p.summary);
+      else if (p.kind === 'close') await proposeClose(s);
+      else {
+        const actions = diffToActions(s.plan, p.newPlan, s.ledger);
+        if (actions.length === 0) { s.plan = p.newPlan; s.activeProposal = null; log(s, 'system', 'Plan updated. No money moves.'); }
+        else await fresh(s, 'change', p.summary, actions, p.newPlan);
+      }
+      log(s, 'system', 'Amounts were worked out again from the current trip. Nothing was sent to the model.');
       await store.put(s);
       return s;
     },
@@ -179,14 +242,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
       return s;
     },
 
-    async createOrder(proposalId) {
+    async createOrder(proposalId, fundingSource = 'paypal') {
       const s = await load();
       const p = s.proposals[proposalId];
       if (!p || p.status !== 'confirmed') throw new UserFacingError('Confirm the proposal before PayPal approval.', 'NOT_CONFIRMED');
-      const holds = p.actions.filter((a) => a.type === 'hold');
-      for (const [i, h] of holds.entries()) await assertMayMove(p, h, holds.slice(0, i).reduce((a, x) => a + x.cents, 0), now()).catch((e) => { throw asUserError(e); });
+      const holds = await assertHoldsMayMove(s, p);
       try {
-        const o = await paypal.createHoldOrder(holds, { tripId: s.id, requestId: `${p.id}:order` });
+        const o = await paypal.createHoldOrder(holds, { tripId: s.id, requestId: `${p.id}:order:${fundingSource}`, fundingSource });
         p.orderId = o.orderId;
       } catch (e) { log(s, 'error', e.message); await store.put(s); throw e; }
       await store.put(s);
@@ -199,9 +261,9 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
       if (!p || !['confirmed', 'executing', 'failed'].includes(p.status)) throw new UserFacingError('This proposal is not waiting for PayPal approval.', 'NOT_CONFIRMED');
       if (p.orderId !== orderId) throw new UserFacingError('That PayPal order does not belong to this proposal.', 'WRONG_ORDER');
       if (!s.ledger.some((f) => f.op === 'authorize' && f.orderId === orderId)) {
+        const holds = await assertHoldsMayMove(s, p);
         try {
           const { authFact, itemBreakdown } = await paypal.authorizeOrder(orderId, { requestId: `${p.id}:authorize`, proposalId: p.id });
-          const holds = p.actions.filter((a) => a.type === 'hold');
           const expectedTotal = holds.reduce((sum, h) => sum + h.cents, 0);
           if (itemBreakdown) {
             for (const h of holds) {
@@ -251,10 +313,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
       const last = Object.values(s.proposals).filter((x) => ['executed', 'failed'].includes(x.status)).at(-1) ?? null;
       return {
         id: s.id,
+        now: now(),
+        closed: Boolean(s.closedAt),
+        closedAt: s.closedAt ?? null,
         plan: { ...s.plan, items },
         removedItems: removed,
         reserves: reserves(s.ledger),
-        canClose: closeActions(s.plan, s.ledger).length > 0,
+        canClose: !s.closedAt && s.ledger.length > 0,
         totals: { plannedCents: planTotalCents(s.plan), ...ledgerTotals(s.ledger) },
         perPerson: perPersonCents(s.plan),
         ledger: s.ledger,

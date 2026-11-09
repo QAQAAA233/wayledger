@@ -13,18 +13,19 @@ export async function sha256Hex(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-const canonical = (p) => JSON.stringify({ trip: p.tripId, kind: p.kind, actions: p.actions, cap: p.capCents, exp: p.expiresAt, plan: p.newPlan ?? null });
+const canonical = (p) => JSON.stringify({ trip: p.tripId, kind: p.kind, actions: p.actions, cap: p.capCents, exp: p.expiresAt, plan: p.newPlan ?? null, ...(p.unfunded ? { unfunded: p.unfunded } : {}) });
 
-export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, now }) {
+export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, now, ttlMs = PROPOSAL_TTL_MS }) {
   if (actions.length === 0) throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
   const proposal = {
     id, tripId, kind, summary,
     actions,
     newPlan,
+    ...(unfunded ? { unfunded } : {}),
     capCents: actions.reduce((a, x) => a + x.cents, 0),
     netCents: netCents(actions),
     createdAt: now,
-    expiresAt: now + PROPOSAL_TTL_MS,
+    expiresAt: now + ttlMs,
     status: 'pending',
     confirmation: null,
     results: [],

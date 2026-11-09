@@ -203,6 +203,24 @@ export function reconcile(ledger, remote) {
     });
   }
 
+  // A void is a PayPal action too: PayPal must report that authorization as VOIDED.
+  for (const f of ledger) {
+    if (f.op !== 'void') continue;
+    const rem = remote[f.id];
+    const remoteStatus = rem?.status ?? 'MISSING';
+    rows.push({
+      seq: f.seq,
+      op: 'void',
+      itemId: f.itemId,
+      id: f.id,
+      ledgerCents: f.cents,
+      paypalCents: rem?.cents ?? null,
+      ledgerStatus: 'VOIDED',
+      paypalStatus: remoteStatus,
+      match: remoteStatus === 'VOIDED',
+    });
+  }
+
   const heldItemsCheck = res.flatMap((r) => {
     const rem = remote[r.id];
     const remoteStatus = rem?.status ?? 'MISSING';

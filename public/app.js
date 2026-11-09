@@ -1,13 +1,15 @@
 const $app = document.getElementById('app');
-const S = { trip: null, busy: null, error: null, tab: 'budget', recon: null, draft: '', changeDraft: '', config: null };
+const S = { trip: null, busy: null, error: null, errorAt: null, notice: null, tab: 'budget', recon: null, draft: '', changeDraft: '', config: null, skew: 0, expiredId: null, judge: null };
 let grids = [];
 let ppRenderedFor = null;
 let timer = null;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const usd = (c) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const clock = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 const STATUS = { planned: 'Planned', held: 'Held', paid: 'Paid', released: 'Released', refunded: 'Refunded', 'part-refunded': 'Part refunded' };
 const OPS = { authorize: 'Trip reserve', allocate: 'Allocate quota', release: 'Free quota', capture: 'Charge', void: 'Void reserve', refund: 'Refund' };
+const PAYPAL_OPS = ['authorize', 'capture', 'void', 'refund'];
 
 const SAMPLE_TRIPS = [
   'Three friends - Ana, Ben and Cy - 4 days in Lisbon in May. Budget $1,200 total. We want a flat, a sunset boat tour and a Sintra day trip.',
@@ -17,13 +19,25 @@ const SAMPLE_TRIPS = [
 const SAMPLE_CHANGES = [
   'A storm is forecast for day 2. Swap any outdoor activity for an indoor one.',
   'We found a free place to stay, so drop the lodging.',
-  'The last traveler cannot come anymore. Lower the shared costs accordingly.',
 ];
+
+// The server's clock decides when a proposal expires; the browser only shows it.
+const serverNow = () => Date.now() + S.skew;
+const isExpired = (p) => p.status === 'expired' || S.expiredId === p.id || serverNow() >= p.expiresAt;
+
+// A judge code (from the testing instructions) arrives as ?judge=... and is kept in this browser only.
+function readJudgeCode() {
+  const m = location.search.match(/[?&]judge=([^&#]+)/);
+  try {
+    if (m) { localStorage.setItem('wayledger:judge', decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname + location.hash); }
+    return localStorage.getItem('wayledger:judge');
+  } catch { return m ? decodeURIComponent(m[1]) : null; }
+}
 
 async function api(path, method = 'GET', body) {
   let res;
   try {
-    res = await fetch(`/api${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(`/api${path}`, { method, headers: { 'content-type': 'application/json', ...(S.judge ? { 'x-judge-code': S.judge } : {}) }, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw { message: 'Could not reach the server. Check your connection and try again. Nothing was changed.', retry: true };
   }
@@ -32,13 +46,33 @@ async function api(path, method = 'GET', body) {
   return data;
 }
 
-function run(label, fn, retryFn) {
-  S.busy = label; S.error = null; render();
-  return fn().then((v) => { S.busy = null; return v; }).catch((e) => { S.busy = null; S.error = { ...e, retryFn }; render(); });
+// The cancelled-approval notice sits next to the PayPal button; clearing it must not redraw the button
+// while PayPal is opening its window.
+function clearNotice() {
+  S.notice = null;
+  document.getElementById('pp-notice')?.setAttribute('hidden', '');
+}
+
+// Anything that went wrong is shown where the person acted: next to the PayPal / confirm button
+// (`proposal`) or in the agent panel (`agent`, `landing`).
+function fail(e, at, retryFn) {
+  S.busy = null;
+  S.error = { message: e?.message ?? 'Something went wrong. Nothing was changed.', code: e?.code, debugId: e?.debugId, retry: e?.retry, retryFn: e?.retry ? retryFn : undefined };
+  S.errorAt = at;
+  if (e?.code === 'EXPIRED' && S.trip?.proposal) S.expiredId = S.trip.proposal.id;
+  render();
+}
+
+// A step ends by clearing the busy state AND drawing again; drawing while still busy is how the PayPal
+// button used to stay missing and Confirm stayed grey after a successful step.
+function run(label, fn, retryFn, at = 'agent') {
+  S.busy = label; S.error = null; S.notice = null; render();
+  return fn().then(() => { S.busy = null; render(); }).catch((e) => fail(e, at, retryFn));
 }
 
 function setTrip(t) {
-  S.trip = t; S.recon = null;
+  S.trip = t; S.recon = null; S.notice = null;
+  S.skew = (t.now ?? Date.now()) - Date.now();
   try { localStorage.setItem('wayledger:last', t.id); } catch {}
   if (location.hash !== `#/t/${t.id}`) history.replaceState(null, '', `#/t/${t.id}`);
   render();
@@ -46,14 +80,14 @@ function setTrip(t) {
 
 function createTrip() {
   const prompt = S.draft.trim();
-  const go = () => run('Planning your trip...', async () => setTrip(await api('/trips', 'POST', { prompt })), go);
+  const go = () => run('Planning your trip...', async () => setTrip(await api('/trips', 'POST', { prompt })), go, 'landing');
   return go();
 }
 
 function sendChange(text) {
   const t = text ?? S.changeDraft.trim();
   if (!t) return;
-  const go = () => run('The agent is working out the money difference...', async () => { S.changeDraft = ''; setTrip(await api(`/trips/${S.trip.id}/changes`, 'POST', { text: t })); }, go);
+  const go = () => run('The agent is working out the money difference...', async () => { const next = await api(`/trips/${S.trip.id}/changes`, 'POST', { text: t }); S.changeDraft = ''; setTrip(next); }, go);
   return go();
 }
 
@@ -64,7 +98,13 @@ function closeTrip() {
 
 function confirmRelease() {
   const p = S.trip.proposal;
-  const go = () => run('Confirming and updating the ledger...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/confirm`, 'POST', { digest: p.digest })), go);
+  const go = () => run('Confirming and updating the ledger...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/confirm`, 'POST', { digest: p.digest })), go, 'proposal');
+  return go();
+}
+
+function refreshProposal() {
+  const p = S.trip.proposal;
+  const go = () => run('Working out the amounts again from the current trip...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/refresh`, 'POST')), go, 'proposal');
   return go();
 }
 
@@ -77,7 +117,7 @@ function retryProposal() {
 async function verify() {
   S.busy = 'Asking PayPal for the current state of every authorization, capture and refund...'; render();
   try { S.recon = await api(`/trips/${S.trip.id}/reconcile`); S.error = null; }
-  catch (e) { S.error = e; }
+  catch (e) { S.error = e; S.errorAt = 'agent'; }
   S.busy = null; render();
 }
 
@@ -94,27 +134,28 @@ function loadPayPalSdk() {
 async function mountPayPal() {
   const p = S.trip?.proposal;
   const el = document.getElementById('pp');
-  if (!el || S.busy || !p || !p.actions.some((a) => a.type === 'hold') || p.status === 'executed') { ppRenderedFor = null; return; }
+  if (!el || S.busy || !p || !p.actions.some((a) => a.type === 'hold') || p.status === 'executed' || isExpired(p)) { ppRenderedFor = null; return; }
   if (ppRenderedFor === p.id + p.status && el.childElementCount > 0) return;
   ppRenderedFor = p.id + p.status;
   try {
     await loadPayPalSdk();
     window.paypal.Buttons({
-      style: { layout: 'vertical', shape: 'rect', label: 'pay', height: 44 },
-      createOrder: async () => {
+      style: { layout: 'vertical', shape: 'rect', label: 'paypal', height: 44 },
+      createOrder: async (data) => {
         try {
+          clearNotice();
           if (S.trip.proposal.status === 'pending') S.trip = await api(`/trips/${S.trip.id}/proposals/${p.id}/confirm`, 'POST', { digest: p.digest });
-          const { orderId } = await api(`/trips/${S.trip.id}/proposals/${p.id}/order`, 'POST');
+          const { orderId } = await api(`/trips/${S.trip.id}/proposals/${p.id}/order`, 'POST', { fundingSource: data?.paymentSource });
           return orderId;
-        } catch (e) { S.error = e; render(); throw e; }
+        } catch (e) { fail(e, 'proposal'); throw e; }
       },
       onApprove: async (data) => {
-        S.busy = 'PayPal approved. Placing the trip reserve, allocating quotas and applying the change...'; render();
+        clearNotice(); S.error = null; S.busy = 'PayPal approved. Placing the trip reserve, allocating quotas and applying the change...'; render();
         try { setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/approve`, 'POST', { orderId: data.orderID })); S.busy = null; render(); }
-        catch (e) { S.busy = null; S.error = e; render(); }
+        catch (e) { fail(e, 'proposal'); }
       },
       onCancel: () => { S.error = null; S.notice = 'PayPal approval was cancelled. No money moved. You can approve again whenever you are ready.'; render(); },
-      onError: () => { S.error = { message: 'PayPal could not complete the approval. No money moved - you can try again.', retry: true }; render(); },
+      onError: () => { if (!S.error) fail({ message: 'PayPal could not complete the approval. No money moved - you can try again.' }, 'proposal'); },
     }).render('#pp');
   } catch {
     el.innerHTML = '<div class="err">PayPal could not be loaded. Check your connection and reload.</div>';
@@ -123,8 +164,8 @@ async function mountPayPal() {
 
 /* ---------- views ---------- */
 
-function errorBox() {
-  if (!S.error) return '';
+function errorBox(...ats) {
+  if (!S.error || !ats.includes(S.errorAt)) return '';
   const e = S.error;
   return `<div class="err" role="alert"><b>${esc(e.message)}</b>${e.debugId ? ` <small>(PayPal debug id ${esc(e.debugId)})</small>` : ''}${e.retryFn ? `<div class="row"><button class="btn small" data-act="retry-error">Try again</button></div>` : ''}</div>`;
 }
@@ -138,7 +179,7 @@ function landing() {
       <textarea id="prompt" rows="4" maxlength="1200" placeholder="Three of us, Lisbon, 4 days in May, $1,200 total. A flat, a boat tour, a Sintra day trip.">${esc(S.draft)}</textarea>
       <div class="row" style="margin-top:12px"><button class="btn" data-act="plan" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : 'Plan my trip'}</button><span style="color:var(--muted);font-size:.85rem">Try one:</span></div>
       <div class="chips">${SAMPLE_TRIPS.map((t, i) => `<button class="chip" data-act="sample" data-i="${i}">${esc(t.length > 62 ? t.slice(0, 60) + '...' : t)}</button>`).join('')}</div>
-      ${errorBox()}
+      ${errorBox('landing')}
     </div>
     <div class="how">
       <div><b>1. Plan</b>One sentence in. Itinerary, budget and who owes what come out.</div>
@@ -166,6 +207,7 @@ function proposalCard() {
   const t = S.trip; const p = t.proposal;
   if (!p) return '';
   const hasHold = p.actions.some((a) => a.type === 'hold');
+  const expired = isExpired(p);
   const label = (a) => {
     if (a.type === 'hold') return `<span class="k">Hold</span>${esc(a.title)}${a.captureAfter ? ' <small>(charged now)</small>' : ' <small>(in trip reserve)</small>'}`;
     if (a.type === 'allocate') return `<span class="k">Use reserve</span>${esc(a.title)} <small>(from existing trip reserve)</small>`;
@@ -185,13 +227,24 @@ function proposalCard() {
   }
   const title = p.kind === 'checkout' ? 'Ready to book' : p.kind === 'close' ? 'Close trip - settle holds & void unused reserve' : 'The plan changed - here is the money difference';
   const btnText = p.kind === 'close' ? `Confirm & close trip (${usd(p.capCents)})` : p.actions.every((a) => a.type === 'refund') ? `Confirm - refund ${usd(p.capCents)}` : `Confirm plan & quota change`;
+  const unfunded = p.unfunded?.length ? `<div class="notice">Never booked, so nothing to settle for: ${p.unfunded.map((u) => `${esc(u.title)} (${usd(u.cents)})`).join(', ')}.</div>` : '';
+  let action;
+  if (expired) {
+    action = `<div class="expired"><b>This proposal timed out.</b> Nothing was held or charged. Refreshing works out the same change again from the current trip, without asking the model.</div>
+      <div class="row"><button class="btn" data-act="refresh" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : 'Refresh amounts'}</button></div>`;
+  } else if (hasHold) {
+    action = '<div style="font-size:.85rem;color:var(--muted)">Pressing the PayPal button confirms the exact amounts above, then PayPal asks you to approve the trip reserve.</div><div id="pp"></div>';
+  } else {
+    action = `<div class="row"><button class="btn" data-act="confirm" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : btnText}</button></div>`;
+  }
   return `<section class="card proposal" aria-label="Proposal awaiting confirmation">
     <h2>${title}</h2>
     <div style="font-size:.95rem">${esc(p.summary)}</div>
     <ul class="acts">${p.actions.map((a) => `<li class="${a.type}"><span>${label(a)}</span><b>${usd(a.cents)}</b></li>`).join('')}</ul>
+    ${unfunded}
     <div class="sumline"><span>Net: <b>${netText}</b></span><span>Confirmed cap: <b>${usd(p.capCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
-    ${hasHold ? '<div style="font-size:.85rem;color:var(--muted)">Pressing the PayPal button confirms the exact amounts above, then PayPal asks you to approve the trip reserve.</div><div id="pp"></div>'
-      : `<div class="row"><button class="btn" data-act="confirm" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : btnText}</button></div>`}
+    ${action}
+    <div class="notice" id="pp-notice" ${S.notice ? '' : 'hidden'}>${esc(S.notice ?? '')}</div>${errorBox('proposal')}
   </section>`;
 }
 
@@ -206,24 +259,28 @@ function failedCard() {
 function agentCard() {
   const t = S.trip;
   const kinds = { user: 'You', agent: 'Agent', system: 'Ledger', error: 'Problem' };
+  const input = t.closed ? '' : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="change" maxlength="800" placeholder="Tell the agent what changed..." value="${esc(S.changeDraft)}" aria-label="What changed"><button class="btn" data-act="change" ${S.busy ? 'disabled' : ''}>Send</button></div>
+    <div class="chips">${SAMPLE_CHANGES.map((c, i) => `<button class="chip" data-act="sample-change" data-i="${i}">${esc(c.length > 54 ? c.slice(0, 52) + '...' : c)}</button>`).join('')}</div>`;
   return `<section class="card"><h2>Agent</h2>
     <div class="feed" id="feed">${t.events.map((e) => `<div class="msg ${e.kind}"><b>${kinds[e.kind]}</b>${esc(e.text)}</div>`).join('')}</div>
-    <div class="row" style="flex-wrap:nowrap"><input type="text" id="change" maxlength="800" placeholder="Tell the agent what changed..." value="${esc(S.changeDraft)}" aria-label="What changed"><button class="btn" data-act="change" ${S.busy ? 'disabled' : ''}>Send</button></div>
-    <div class="chips">${SAMPLE_CHANGES.map((c, i) => `<button class="chip" data-act="sample-change" data-i="${i}">${esc(c.length > 54 ? c.slice(0, 52) + '...' : c)}</button>`).join('')}</div>
-    ${S.busy && S.trip ? `<div class="notice"><span class="spin"></span>${esc(S.busy)}</div>` : ''}${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}${errorBox()}</section>`;
+    ${input}
+    ${S.busy && S.trip ? `<div class="notice"><span class="spin"></span>${esc(S.busy)}</div>` : ''}${t.proposal ? '' : (S.notice ? `<div class="notice">${esc(S.notice)}</div>` : '')}${errorBox('agent', ...(t.proposal ? [] : ['proposal']))}</section>`;
 }
 
 function ledgerCard() {
   const t = S.trip;
   const r = S.recon;
+  const paypalCount = t.ledger.filter((f) => PAYPAL_OPS.includes(f.op)).length;
+  const quotaCount = t.ledger.length - paypalCount;
   const verifyLine = r
     ? (r.allMatch
       ? `<span class="ok">Ledger matches PayPal: ${r.rows.length}/${r.rows.length} PayPal records &amp; ${r.heldItemsCheck?.length ?? 0} held item(s) verified</span>`
       : `<span class="bad">${r.rows.filter((x) => !x.match).length + (r.heldItemsCheck?.filter((h) => !h.valid).length ?? 0)} discrepancy(s) against PayPal</span>`)
     : '<span style="color:var(--muted)">PayPal facts are copied from PayPal responses; quotas track item allocations under each trip reserve.</span>';
+  const rows = S.tab === 'budget' ? Math.max(3, t.plan.items.length + t.removedItems.length) : Math.max(3, S.tab === 'paypal' ? paypalCount : quotaCount);
   return `<section class="card"><h2>Budget &amp; ledger</h2>
-    <div class="tabs" role="tablist"><button class="tab" role="tab" data-act="tab" data-tab="budget" aria-selected="${S.tab === 'budget'}">Budget by item</button><button class="tab" role="tab" data-act="tab" data-tab="ledger" aria-selected="${S.tab === 'ledger'}">PayPal ledger (${t.ledger.length})</button></div>
-    <div class="grid-wrap"><div id="grid" class="ag-theme-quartz" style="height:${S.tab === 'budget' ? 60 + 42 * Math.max(3, t.plan.items.length + t.removedItems.length) : 60 + 42 * Math.max(3, t.ledger.length)}px;max-height:520px"></div></div>
+    <div class="tabs" role="tablist"><button class="tab" role="tab" data-act="tab" data-tab="budget" aria-selected="${S.tab === 'budget'}">Budget by item</button><button class="tab" role="tab" data-act="tab" data-tab="paypal" aria-selected="${S.tab === 'paypal'}">PayPal activity (${paypalCount})</button><button class="tab" role="tab" data-act="tab" data-tab="quota" aria-selected="${S.tab === 'quota'}">Item quotas (${quotaCount})</button></div>
+    <div class="grid-wrap"><div id="grid" class="ag-theme-quartz" style="height:${60 + 42 * rows}px;max-height:520px"></div></div>
     <div class="verify"><button class="btn ghost small" data-act="verify" ${S.busy ? 'disabled' : ''} ${t.ledger.length ? '' : 'disabled'}>Verify against PayPal</button>${verifyLine}</div>
   </section>`;
 }
@@ -231,8 +288,10 @@ function ledgerCard() {
 function tripView() {
   const t = S.trip; const tot = t.totals;
   const per = Object.entries(t.perPerson).map(([n, c]) => `<span>${esc(n)} <b>${usd(c)}</b></span>`).join('');
-  const showClose = t.canClose && t.ledger.length > 0 && t.proposal?.kind !== 'close';
+  const showClose = t.canClose && t.proposal?.kind !== 'close';
+  const closedNote = t.closed ? `<div class="notice closed">This trip is closed (${esc(new Date(t.closedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}). Held items were charged and the unused reserve was released in PayPal, so the plan and the money can no longer change. Start a new trip to plan something else.</div>` : '';
   return `<div class="tripbar"><div><h1>${esc(t.plan.title)}</h1><div class="sub">${esc(t.plan.destination)} &middot; ${esc(t.plan.travelers.join(', '))}${t.plan.budgetCents ? ` &middot; budget ${usd(t.plan.budgetCents)}` : ''}</div></div><div class="row">${showClose ? `<button class="btn small" data-act="close" ${S.busy ? 'disabled' : ''}>Close trip</button>` : ''}<button class="btn ghost small" data-act="new">New trip</button></div></div>
+  ${closedNote}
   <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold${tot.unusedReserveCents > 0 ? ` (+${usd(tot.unusedReserveCents)} free reserve)` : ''}</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Paid</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
   <div class="layout">
     <div class="col">${window.innerWidth <= 900 ? proposalCard() : ''}<section class="card"><h2>Itinerary</h2>${itinerary()}<h2 style="margin-top:14px">Shares</h2><div class="per">${per}</div></section>${ledgerCard()}</div>
@@ -249,26 +308,41 @@ function mountGrid() {
   const t = S.trip;
   const pill = (p) => `<span class="pill ${p.value}">${STATUS[p.value] ?? p.value}</span>`;
   const money = (p) => (p.value == null ? '' : usd(p.value));
+  const defaultColDef = { sortable: true, resizable: true };
   if (S.tab === 'budget') {
-    const rows = [...t.plan.items.map((i) => ({ day: i.day, item: i.title, category: i.category, total: i.amountCents, status: i.money.status, held: i.money.heldCents, paid: i.money.paidCents, refunded: i.money.refundedCents })),
-      ...t.removedItems.map((r) => ({ day: null, item: `${r.title} (removed)`, category: 'removed', total: 0, status: r.money.status, held: r.money.heldCents, paid: r.money.paidCents, refunded: r.money.refundedCents }))];
+    const rows = [...t.plan.items.map((i) => ({ day: i.day, item: i.title, total: i.amountCents, status: i.money.status, held: i.money.heldCents, paid: i.money.paidCents, refunded: i.money.refundedCents })),
+      ...t.removedItems.map((r) => ({ day: null, item: `${r.title} (removed)`, total: 0, status: r.money.status, held: r.money.heldCents, paid: r.money.paidCents, refunded: r.money.refundedCents }))];
     grids.push(agGrid.createGrid(el, { rowData: rows, domLayout: 'normal', columnDefs: [
-      { field: 'day', width: 70, headerName: 'Day' }, { field: 'item', headerName: 'Item', flex: 2, minWidth: 190 }, { field: 'category', width: 110 },
-      { field: 'total', headerName: 'Planned', valueFormatter: money, width: 110, type: 'rightAligned' },
-      { field: 'status', cellRenderer: pill, width: 140 },
-      { field: 'held', headerName: 'Held', valueFormatter: money, width: 100, type: 'rightAligned' },
-      { field: 'paid', headerName: 'Paid', valueFormatter: money, width: 100, type: 'rightAligned' },
-      { field: 'refunded', headerName: 'Refunded', valueFormatter: money, width: 110, type: 'rightAligned' },
-    ], defaultColDef: { sortable: true, resizable: true }, suppressCellFocus: true }));
-  } else {
-    const title = (id) => (id === '_reserve' ? 'Trip reserve (PayPal Authorization)' : t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id);
-    const rows = [...t.ledger].reverse().map((f) => ({ seq: f.seq, at: new Date(f.at).toLocaleTimeString(), op: OPS[f.op] ?? f.op, item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
-    grids.push(agGrid.createGrid(el, { rowData: rows, columnDefs: [
-      { field: 'seq', headerName: '#', width: 64 }, { field: 'at', headerName: 'Time', width: 100 }, { field: 'op', headerName: 'Action', width: 140 },
-      { field: 'item', flex: 2, minWidth: 180 }, { field: 'id', headerName: 'PayPal ID', width: 190, cellStyle: { fontFamily: 'ui-monospace, monospace', fontSize: '12px' } },
-      { field: 'cents', headerName: 'Amount', valueFormatter: money, width: 110, type: 'rightAligned' }, { field: 'status', headerName: 'Status', width: 130 },
-    ], defaultColDef: { sortable: true, resizable: true }, suppressCellFocus: true }));
+      { field: 'day', headerName: 'Day', width: 58, minWidth: 52 },
+      { field: 'item', headerName: 'Item', flex: 3, minWidth: 130, tooltipField: 'item' },
+      { field: 'total', headerName: 'Planned', valueFormatter: money, flex: 1, minWidth: 82, type: 'rightAligned' },
+      { field: 'status', cellRenderer: pill, flex: 1.3, minWidth: 108 },
+      { field: 'held', headerName: 'Held', valueFormatter: money, flex: 1, minWidth: 76, type: 'rightAligned' },
+      { field: 'paid', headerName: 'Paid', valueFormatter: money, flex: 1, minWidth: 76, type: 'rightAligned' },
+      { field: 'refunded', headerName: 'Refunded', valueFormatter: money, flex: 1, minWidth: 88, type: 'rightAligned' },
+    ], defaultColDef, suppressCellFocus: true }));
+    return;
   }
+  const title = (id) => (id === '_reserve' ? 'Whole trip' : t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id);
+  const wanted = (f) => (S.tab === 'paypal') === PAYPAL_OPS.includes(f.op);
+  const rows = [...t.ledger].filter(wanted).reverse().map((f) => ({ at: clock.format(new Date(f.at)), op: OPS[f.op] ?? f.op, item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
+  const columnDefs = S.tab === 'paypal'
+    ? [
+      { field: 'op', headerName: 'Action', flex: 1.2, minWidth: 104 },
+      { field: 'item', headerName: 'Item', flex: 2, minWidth: 110, tooltipField: 'item' },
+      { field: 'cents', headerName: 'Amount', valueFormatter: money, flex: 1, minWidth: 84, type: 'rightAligned' },
+      { field: 'status', headerName: 'PayPal status', flex: 1.2, minWidth: 112 },
+      { field: 'id', headerName: 'PayPal ID', width: 140, cellStyle: { fontFamily: 'ui-monospace, monospace', fontSize: '12px' } },
+      { field: 'at', headerName: 'Time', width: 84 },
+    ]
+    : [
+      { field: 'op', headerName: 'Action', flex: 1.2, minWidth: 110 },
+      { field: 'item', headerName: 'Item', flex: 2, minWidth: 130, tooltipField: 'item' },
+      { field: 'cents', headerName: 'Amount', valueFormatter: money, flex: 1, minWidth: 84, type: 'rightAligned' },
+      { field: 'status', headerName: 'Quota status', flex: 1.2, minWidth: 110 },
+      { field: 'at', headerName: 'Time', width: 84 },
+    ];
+  grids.push(agGrid.createGrid(el, { rowData: rows, columnDefs, defaultColDef, suppressCellFocus: true }));
 }
 
 /* ---------- render & events ---------- */
@@ -281,13 +355,18 @@ function render() {
   const feed = document.getElementById('feed'); if (feed) feed.scrollTop = feed.scrollHeight;
 }
 
+// Counts down to the server's expiry. When it hits zero the card switches to its expired state once.
 function tick() {
   clearInterval(timer);
   const el = document.getElementById('exp');
-  if (!el || !S.trip?.proposal) return;
+  const p = S.trip?.proposal;
+  if (!el || !p) return;
+  if (isExpired(p)) { el.textContent = 'expired'; return; }
   const upd = () => {
-    const left = Math.max(0, S.trip.proposal.expiresAt - Date.now());
-    el.textContent = left ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}` : 'expired - ask again';
+    const left = Math.max(0, p.expiresAt - serverNow());
+    if (left) { el.textContent = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`; return; }
+    clearInterval(timer);
+    S.expiredId = p.id; ppRenderedFor = null; render();
   };
   upd(); timer = setInterval(upd, 1000);
 }
@@ -297,21 +376,24 @@ $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id =
 $app.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const a = b.dataset.act;
-  if (a === 'plan') { if (S.draft.trim().length >= 8) createTrip(); else { S.error = { message: 'Describe the trip in a sentence or two first.' }; render(); } }
+  if (a === 'plan') { if (S.draft.trim().length >= 8) createTrip(); else { S.error = { message: 'Describe the trip in a sentence or two first.' }; S.errorAt = 'landing'; render(); } }
   else if (a === 'sample') { S.draft = SAMPLE_TRIPS[b.dataset.i]; render(); }
   else if (a === 'sample-change') { S.changeDraft = SAMPLE_CHANGES[b.dataset.i]; render(); }
   else if (a === 'change') sendChange();
   else if (a === 'close') closeTrip();
   else if (a === 'confirm') confirmRelease();
+  else if (a === 'refresh') refreshProposal();
   else if (a === 'retry-proposal') retryProposal();
   else if (a === 'retry-error') S.error?.retryFn?.();
   else if (a === 'verify') verify();
   else if (a === 'tab') { S.tab = b.dataset.tab; render(); }
-  else if (a === 'new') { S.trip = null; S.error = null; S.recon = null; history.replaceState(null, '', '#/'); render(); }
+  else if (a === 'new') { S.trip = null; S.error = null; S.notice = null; S.recon = null; history.replaceState(null, '', '#/'); render(); }
 });
 window.addEventListener('resize', (() => { let w = innerWidth <= 900; return () => { const n = innerWidth <= 900; if (n !== w) { w = n; ppRenderedFor = null; render(); } }; })());
 
 (async function boot() {
+  S.judge = readJudgeCode();
+  if (S.judge) document.getElementById('judge')?.removeAttribute('hidden');
   S.config = await api('/config').catch(() => ({}));
   const m = location.hash.match(/^#\/t\/([0-9a-f]{24})$/);
   const id = m?.[1];

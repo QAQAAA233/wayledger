@@ -25,6 +25,8 @@ button { font: inherit; cursor: pointer; }
 .tagline { color: var(--muted); font-size: .9rem; flex: 1; }
 .badge { font-size: .75rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
 .badge.sandbox { background: var(--held-bg); color: var(--held); }
+.badge.judge { background: var(--accent-soft); color: var(--accent); }
+.badge[hidden] { display: none; }
 main { max-width: 1240px; margin: 0 auto; padding: 8px 16px 40px; }
 .foot { max-width: 1240px; margin: 0 auto; padding: 0 16px 32px; color: var(--muted); font-size: .8rem; }
 
@@ -49,6 +51,8 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .err { background: var(--danger-bg); color: var(--danger); border-radius: 10px; padding: 10px 12px; margin-top: 12px; font-size: .92rem; }
 .err .row { margin-top: 6px; }
 .notice { background: var(--accent-soft); color: var(--ink); border-radius: 10px; padding: 10px 12px; margin-top: 12px; font-size: .92rem; }
+.notice.closed { margin: 0 0 14px; }
+.expired { background: var(--held-bg); color: var(--held); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: .92rem; }
 
 .tripbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 12px 0 14px; }
 .tripbar h1 { font-size: clamp(1.4rem, 4vw, 2rem); }
@@ -74,9 +78,12 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .pill.paid { background: var(--paid-bg); color: var(--paid); }
 .pill.released { background: var(--released-bg); color: var(--released); }
 .pill.refunded, .pill.part-refunded { background: var(--refunded-bg); color: var(--refunded); }
+.ag-cell .pill { line-height: 1.5; vertical-align: middle; white-space: nowrap; }
 
 .grid-wrap { width: 100%; }
 .ag-theme-quartz { --ag-font-family: system-ui, -apple-system, "Segoe UI", sans-serif; --ag-font-size: 13px; --ag-background-color: var(--surface); --ag-foreground-color: var(--ink); --ag-header-background-color: var(--surface-2); --ag-border-color: var(--line); --ag-odd-row-background-color: var(--surface); --ag-row-hover-color: var(--accent-soft); --ag-accent-color: var(--accent); width: 100%; }
+/* tighter cells so amounts and PayPal statuses are not cut off (the theme sets this on the same element, so the id wins) */
+#grid.ag-theme-quartz { --ag-cell-horizontal-padding: 8px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .tab { border: 1px solid var(--line); background: transparent; color: var(--muted); padding: 5px 12px; border-radius: 999px; font-size: .85rem; }
 .tab[aria-selected=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }

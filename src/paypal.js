@@ -41,11 +41,19 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
   const amount = (cents) => ({ currency_code: 'USD', value: fromCents(cents) });
   const fact = (op, itemId, o, extra = {}) => ({ op, itemId, id: o.id, status: o.status, cents: toCents(o.amount.value), at: Date.now(), ...extra });
 
+  // What the buyer sees in PayPal: our name, no shipping address (a trip is not a parcel), one clear button.
+  // PayPal-wallet orders use the current `payment_source` field; the card button is a different funding
+  // source and keeps the same settings through `application_context`.
+  const experience = { brand_name: 'Wayledger', shipping_preference: 'NO_SHIPPING' };
+
   return {
-    async createHoldOrder(holds, { tripId, requestId }) {
+    async createHoldOrder(holds, { tripId, requestId, fundingSource = 'paypal' }) {
       const totalCents = holds.reduce((a, h) => a + h.cents, 0);
       const order = await call('POST', '/v2/checkout/orders', {
         intent: 'AUTHORIZE',
+        ...(fundingSource === 'card'
+          ? { application_context: experience }
+          : { payment_source: { paypal: { experience_context: { ...experience, user_action: 'PAY_NOW' } } } }),
         purchase_units: [{
           reference_id: holds.length === 1 ? holds[0].itemId : String(tripId ?? 'trip').slice(0, 64),
           description: holds.map((h) => h.title).join(', ').slice(0, 120),

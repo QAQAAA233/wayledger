@@ -40,8 +40,11 @@ Permanent tests guard the promises that matter: *no confirmation means no money 
 
 ```
 public/            single-page UI (vanilla JS, AG Grid Community for budget + ledger, PayPal JS SDK buttons)
-src/index.js       Worker routes, TripDO (one per trip), Quota DO (per-visitor + daily demo limits)
-src/engine.js      createTrip / requestChange / closeTrip / confirm / order / approve / retry / reconcile
+src/index.js       Worker entry and the two Durable Object classes (TripDO: one per trip, Quota: demo limits)
+src/api.js         Routes and the demo allowance (per visitor, per day, judge code)
+src/trip-runner.js Serializes calls on one trip; plain data in, plain data out
+src/quota.js       Fixed-window counters
+src/engine.js      createTrip / requestChange / closeTrip / confirm / order / approve / refresh / retry / reconcile
 src/ai.js          Cloudflare Workers AI (Llama 3.3 70B, JSON-schema output, one corrective retry)
 src/paypal.js      PayPal REST client (Orders v2, Payments v2) returning ledger facts
 src/domain/        plan rules, money delta (reserves + quotas + close), proposal guard, ledger (pure, no I/O)
@@ -59,14 +62,14 @@ npm install
 printf 'PAYPAL_CLIENT_ID=...\nPAYPAL_CLIENT_SECRET=...\n' > .dev.vars
 npx wrangler login
 npm run dev          # http://localhost:8787
-npm test             # permanent tests, no network needed
+npm test             # permanent tests: engine, routes, and a real-browser run (needs Chrome; set CHROME_PATH if not found)
 ```
 
 Deploy: `npx wrangler secret put PAYPAL_CLIENT_ID`, `npx wrangler secret put PAYPAL_CLIENT_SECRET`, `npm run deploy`.
 
 ### Trying the hosted demo
 
-Open the demo, press a sample trip, then press the PayPal button on the proposal card and log in with the PayPal Sandbox buyer credentials provided in the Devpost submission's **Testing instructions** (or any personal PayPal Sandbox buyer account). The public demo is rate limited per visitor and per day.
+Open the demo, press a sample trip, then press the PayPal button on the proposal card and log in with the PayPal Sandbox buyer credentials provided in the Devpost submission's **Testing instructions** (or any personal PayPal Sandbox buyer account). The public demo is rate limited per visitor and per day; the testing instructions include a judge code that lifts those limits (open the demo with `?judge=<code>`).
 
 ## License
 
