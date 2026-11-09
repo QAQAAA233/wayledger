@@ -43,9 +43,21 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
 
   return {
     async createHoldOrder(holds, { tripId, requestId }) {
+      const totalCents = holds.reduce((a, h) => a + h.cents, 0);
       const order = await call('POST', '/v2/checkout/orders', {
         intent: 'AUTHORIZE',
-        purchase_units: holds.map((h) => ({ reference_id: h.itemId, description: h.title.slice(0, 120), custom_id: tripId, amount: amount(h.cents) })),
+        purchase_units: [{
+          reference_id: holds.length === 1 ? holds[0].itemId : String(tripId ?? 'trip').slice(0, 64),
+          description: holds.map((h) => h.title).join(', ').slice(0, 120),
+          custom_id: String(tripId ?? '').slice(0, 120),
+          amount: { ...amount(totalCents), breakdown: { item_total: amount(totalCents) } },
+          items: holds.map((h) => ({
+            name: h.title.slice(0, 120),
+            sku: h.itemId,
+            quantity: '1',
+            unit_amount: amount(h.cents),
+          })),
+        }],
       }, requestId);
       return { orderId: order.id, status: order.status };
     },
@@ -53,11 +65,27 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     // The buyer has approved in the PayPal popup; this places the holds.
     async authorizeOrder(orderId, { requestId, proposalId }) {
       const order = await call('POST', `/v2/checkout/orders/${orderId}/authorize`, undefined, requestId);
+      let fullOrder = null;
       const facts = [];
-      for (const pu of order.purchase_units ?? []) {
+      for (let i = 0; i < (order.purchase_units ?? []).length; i++) {
+        const pu = order.purchase_units[i];
+        let items = pu.items;
+        if (!items) {
+          fullOrder ??= await call('GET', `/v2/checkout/orders/${orderId}`);
+          items = fullOrder.purchase_units?.[i]?.items;
+        }
         for (const a of pu.payments?.authorizations ?? []) {
           const full = await call('GET', `/v2/payments/authorizations/${a.id}`);
-          facts.push(fact('authorize', pu.reference_id, full, { orderId, proposalId }));
+          if (items?.length) {
+            const authCents = toCents(full.amount.value);
+            const itemsSum = items.reduce((s, it) => s + toCents(it.unit_amount.value), 0);
+            items.forEach((it, idx) => {
+              const cents = toCents(it.unit_amount.value) + (idx === 0 ? authCents - itemsSum : 0);
+              facts.push({ ...fact('authorize', it.sku, full, { orderId, proposalId }), cents });
+            });
+          } else {
+            facts.push(fact('authorize', pu.reference_id, full, { orderId, proposalId }));
+          }
         }
       }
       if (facts.length === 0) throw new PayPalError('PayPal did not return any authorization. The buyer may not have approved the order.', { details: order });
@@ -65,15 +93,19 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     },
 
     async capture(authId, itemId, cents, { requestId, proposalId }) {
-      const c = await call('POST', `/v2/payments/authorizations/${authId}/capture`, { amount: amount(cents), final_capture: true }, requestId);
+      const c = await call('POST', `/v2/payments/authorizations/${authId}/capture`, { amount: amount(cents), final_capture: false }, requestId);
       const full = await call('GET', `/v2/payments/captures/${c.id}`);
       return fact('capture', itemId, full, { parentId: authId, proposalId });
     },
 
-    async voidAuthorization(authId, itemId, { requestId, proposalId }) {
-      await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId);
+    async voidAuthorization(authId, itemId, { requestId, proposalId, cents }) {
+      try {
+        await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId);
+      } catch (e) {
+        if (e.details?.[0]?.issue !== 'AUTHORIZATION_ALREADY_VOIDED') throw e;
+      }
       const full = await call('GET', `/v2/payments/authorizations/${authId}`);
-      return fact('void', itemId, full, { proposalId });
+      return { ...fact('void', itemId, full, { proposalId }), cents: cents ?? toCents(full.amount.value) };
     },
 
     async refund(captureId, itemId, cents, { requestId, proposalId, note }) {

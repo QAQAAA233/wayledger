@@ -15,8 +15,8 @@ Most AI checkout demos stop at "buy once". Real group plans change after the mon
 
 | Moment | PayPal call | Who decides |
 |---|---|---|
-| Place holds for every item (one buyer approval, one authorization per item) | `POST /v2/checkout/orders` (`intent: AUTHORIZE`, one purchase unit per item) → `/authorize` | Person approves in PayPal |
-| Prepaid items (lodging) charged at booking | `POST /v2/payments/authorizations/{id}/capture` | Confirmed amounts |
+| Place holds for every item (one buyer approval, itemized breakdown) | `POST /v2/checkout/orders` (`intent: AUTHORIZE`, itemized breakdown) → `/authorize` | Person approves in PayPal |
+| Prepaid items (lodging) charged at booking | `POST /v2/payments/authorizations/{id}/capture` (`final_capture: false`) | Confirmed amounts |
 | Item removed while only held | `POST /v2/payments/authorizations/{id}/void` | Person confirms the proposal |
 | Item removed or cheaper after it was charged | `POST /v2/payments/captures/{id}/refund` (full or partial) | Person confirms the proposal |
 | Item added or price rose | new authorization hold, approved in PayPal | Person approves in PayPal |
@@ -65,14 +65,7 @@ Deploy: `npx wrangler secret put PAYPAL_CLIENT_ID`, `npx wrangler secret put PAY
 
 ### Trying the hosted demo
 
-Open the demo, press a sample trip, then the PayPal button, and log in with the sandbox buyer:
-
-```
-SANDBOX_BUYER_EMAIL
-SANDBOX_BUYER_PASSWORD
-```
-
-(Sandbox account: it holds fake money only.) The public demo is rate limited per visitor and per day.
+Open the demo, press a sample trip, then press the PayPal button on the proposal card and log in with the PayPal Sandbox buyer credentials provided in the Devpost submission's **Testing instructions** (or any personal PayPal Sandbox buyer account). The public demo is rate limited per visitor and per day.
 
 ## License
 

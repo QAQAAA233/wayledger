@@ -59,13 +59,29 @@ export function reconcile(ledger, remote) {
   for (const f of ledger) {
     if (f.op === 'void') continue; // the authorization row below carries the VOIDED status
     const r = remote[f.id];
-    let expectStatus = f.status;
-    if (f.op === 'authorize' && ledger.some((x) => x.op === 'void' && x.id === f.id)) expectStatus = 'VOIDED';
     const remoteStatus = r?.status ?? 'MISSING';
-    // A captured authorization legitimately reports CAPTURED while our fact still says CREATED.
-    const captured = f.op === 'authorize' && ledger.some((x) => x.op === 'capture' && x.parentId === f.id);
-    const statusOk = captured ? ['CAPTURED', 'PARTIALLY_CAPTURED'].includes(remoteStatus) : remoteStatus === expectStatus;
-    rows.push({ seq: f.seq, op: f.op, itemId: f.itemId, id: f.id, ledgerCents: f.cents, paypalCents: r?.cents ?? null, ledgerStatus: captured ? 'CAPTURED' : expectStatus, paypalStatus: remoteStatus, match: statusOk && r?.cents === f.cents });
+    let expectStatus = f.status;
+    let statusOk = remoteStatus === expectStatus;
+    if (f.op === 'authorize') {
+      if (ledger.some((x) => x.op === 'void' && x.id === f.id)) {
+        expectStatus = 'VOIDED';
+        statusOk = remoteStatus === 'VOIDED';
+      } else if (ledger.some((x) => x.op === 'capture' && x.parentId === f.id)) {
+        expectStatus = 'CAPTURED';
+        statusOk = ['CAPTURED', 'PARTIALLY_CAPTURED'].includes(remoteStatus);
+      }
+    } else if (f.op === 'capture') {
+      const refundedCents = ledger.filter((x) => x.op === 'refund' && x.parentId === f.id).reduce((a, x) => a + x.cents, 0);
+      if (refundedCents > 0) {
+        expectStatus = refundedCents >= f.cents ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+        statusOk = [expectStatus, 'COMPLETED'].includes(remoteStatus);
+      }
+    }
+    const expectedRemoteCents = f.op === 'authorize'
+      ? ledger.filter((x) => x.op === 'authorize' && x.id === f.id).reduce((a, x) => a + x.cents, 0)
+      : f.cents;
+    const amountOk = r?.cents === expectedRemoteCents;
+    rows.push({ seq: f.seq, op: f.op, itemId: f.itemId, id: f.id, ledgerCents: f.cents, paypalCents: amountOk ? f.cents : (r?.cents ?? null), ledgerStatus: expectStatus, paypalStatus: remoteStatus, match: statusOk && amountOk });
   }
   return { rows, allMatch: rows.every((r) => r.match) };
 }

@@ -89,8 +89,8 @@ function loadPayPalSdk() {
 async function mountPayPal() {
   const p = S.trip?.proposal;
   const el = document.getElementById('pp');
-  if (!el || !p || !p.actions.some((a) => a.type === 'hold') || p.status === 'executed') { ppRenderedFor = null; return; }
-  if (ppRenderedFor === p.id + p.status) return;
+  if (!el || S.busy || !p || !p.actions.some((a) => a.type === 'hold') || p.status === 'executed') { ppRenderedFor = null; return; }
+  if (ppRenderedFor === p.id + p.status && el.childElementCount > 0) return;
   ppRenderedFor = p.id + p.status;
   try {
     await loadPayPalSdk();
@@ -236,7 +236,7 @@ function mountGrid() {
       { field: 'refunded', headerName: 'Refunded', valueFormatter: money, width: 110, type: 'rightAligned' },
     ], defaultColDef: { sortable: true, resizable: true }, suppressCellFocus: true }));
   } else {
-    const title = (id) => t.plan.items.find((i) => i.id === id)?.title ?? id;
+    const title = (id) => t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id;
     const rows = [...t.ledger].reverse().map((f) => ({ seq: f.seq, at: new Date(f.at).toLocaleTimeString(), op: OPS[f.op], item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
     grids.push(agGrid.createGrid(el, { rowData: rows, columnDefs: [
       { field: 'seq', headerName: '#', width: 64 }, { field: 'at', headerName: 'Time', width: 100 }, { field: 'op', headerName: 'Action', width: 130 },

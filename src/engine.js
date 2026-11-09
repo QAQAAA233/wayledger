@@ -57,7 +57,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now() }) {
     // Releases first, then top-up captures: nothing is charged until the holds exist.
     for (let i = 0; i < p.actions.length && !failed; i++) {
       const a = p.actions[i];
-      if (a.type === 'void') await step(i, (x) => paypal.voidAuthorization(x.authId, x.itemId, { requestId: rid(i, 'void'), proposalId: p.id }));
+      if (a.type === 'void') await step(i, (x) => paypal.voidAuthorization(x.authId, x.itemId, { requestId: rid(i, 'void'), proposalId: p.id, cents: x.cents }));
       if (a.type === 'refund') await step(i, (x) => paypal.refund(x.captureId, x.itemId, x.cents, { requestId: rid(i, 'refund'), proposalId: p.id, note: p.summary }));
     }
     for (let i = 0; i < p.actions.length && !failed; i++) {
