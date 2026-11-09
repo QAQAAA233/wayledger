@@ -20,16 +20,23 @@ const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).jo
 
 // Cheap abuse guard for the public demo: caps on model calls per visitor and per day, and the AI's own daily money
 // guard. A judge code (a Worker secret given in the testing instructions) lifts the per-visitor limit and moves the
-// visitor to a separate, larger daily budget, so judging is never blocked by the public limits. The money guard
-// applies to everyone: when the day's AI allowance is used up, the person is told so plainly.
+// visitor to a separate, larger daily budget. The day's AI allowance is split: the public may use AI_PUBLIC_SHARE of it
+// (70% by default) and the rest is kept for judges, so judging is never blocked by the public using the day up. When
+// the whole allowance is gone nobody starts anything, and the person is told so plainly.
 async function guardAI(env, request) {
   const q = env.QUOTA.get(env.QUOTA.idFromName('q'));
   const day = new Date().toISOString().slice(0, 10);
-  if ((await q.neuronsToday(day)) >= Number(env.AI_DAILY_NEURONS ?? DEFAULT_DAILY_NEURONS)) {
+  const cap = Number(env.AI_DAILY_NEURONS ?? DEFAULT_DAILY_NEURONS);
+  const code = request.headers.get('x-judge-code');
+  const judge = Boolean(env.JUDGE_CODE && code && code === env.JUDGE_CODE);
+  const used = await q.neuronsToday(day);
+  if (used >= cap) {
     throw new UserFacingError("Today's AI budget for this demo is used up, so the agent cannot start. Your trips and money are unchanged. It resets at 00:00 UTC.", 'RATE_LIMIT');
   }
-  const code = request.headers.get('x-judge-code');
-  if (env.JUDGE_CODE && code && code === env.JUDGE_CODE) {
+  if (!judge && used >= Math.floor(cap * Number(env.AI_PUBLIC_SHARE ?? 0.7))) {
+    throw new UserFacingError("The public share of today's AI budget for this demo is used up, so the agent cannot start for now. Your trips and money are unchanged. Judges can use the judge code from the testing instructions. It resets at 00:00 UTC.", 'RATE_LIMIT');
+  }
+  if (judge) {
     if (!(await q.take(`judge:${day}`, Number(env.AI_JUDGE_PER_DAY ?? 600), 86400_000))) throw new UserFacingError('The judging budget for today is used up. It resets at 00:00 UTC.', 'RATE_LIMIT');
     return;
   }
@@ -100,15 +107,20 @@ export async function handleRequest(request, env, deps = {}) {
     }
     if (parts[3] === 'changes') {
       if (typeof body.text !== 'string' || body.text.trim().length < 4 || body.text.length > 800) throw new UserFacingError('Describe what changed (4-800 characters).', 'BAD_INPUT');
-      // Look the trip up before spending any allowance: a request for a trip that does not exist costs nothing.
+      // Look the trip up, and who is asking, before spending any allowance: a request for a trip that does not exist, or from
+      // someone who may not act on it, costs nothing.
       const found = await trip.call('exists', []);
       if (!found.ok) return failure(found.e);
+      const may = await trip.call('mayAct', [], token);
+      if (!may.ok) return failure(may.e);
       await guardAI(env, request);
       return unwrap(await trip.call('startRun', [body.text.trim()], token), 202);
     }
     if (parts[3] === 'wake') {
       const found = await trip.call('exists', []);
       if (!found.ok) return failure(found.e);
+      const may = await trip.call('mayAct', [], token);
+      if (!may.ok) return failure(may.e);
       await guardAI(env, request);
       return unwrap(await trip.call('wake', [{ demo: body.demo === true }], token), 202);
     }

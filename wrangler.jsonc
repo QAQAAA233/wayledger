@@ -17,6 +17,7 @@
     "AI_PER_IP_HOUR": "15",
     "AI_PER_DAY": "400",
     "AI_DAILY_NEURONS": "95000",
+    "AI_PUBLIC_SHARE": "0.7",
     "AGENT_MODEL": "gemma",
     "AGENT_FALLBACK": "oss",
     "WAKE_EVERY_MS": "21600000"

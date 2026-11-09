@@ -39,6 +39,7 @@ export function createTripObject({ storage: raw, env, deps = {} }) {
   };
 
   async function call(method, args = [], token = null) {
+    if (method === 'mayAct') return wrap(async () => { await requireOwner(token); return { ok: true }; });
     if (method === 'startRun') return wrap(async () => { await requireOwner(token); const r = await agent.start({ trigger: 'message', text: args[0] }); return { runId: r.id }; });
     if (method === 'wake') return wrap(async () => { await requireOwner(token); const r = await agent.wake({ simulated: Boolean(args[0]?.demo) }); return { runId: r?.id ?? null }; });
     if (method === 'getRun') return wrap(async () => {

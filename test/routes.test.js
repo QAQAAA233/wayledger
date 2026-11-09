@@ -142,7 +142,7 @@ test('the AI\'s daily budget is a hard stop in code: when it is spent, nothing s
   assert.equal(run.status, 429);
   assert.equal(script.calls, calls, 'no planner call');
   assert.equal(model.log.length, 0, 'no agent call');
-  quota.set(`neurons:${day}`, 4);
+  quota.set(`neurons:${day}`, 2); // under the public share (70% of 5)
   assert.equal((await plan(env)).status, 200, 'it comes back by itself when the day turns or the budget allows');
 });
 
