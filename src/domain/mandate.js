@@ -1,0 +1,83 @@
+import { sha256Hex } from './hash.js';
+
+// The mandate: limits the person signs once, with their first PayPal approval, inside which the agent may change the
+// plan and move money on its own. Everything here is decided by code from numbers; the model can read the limits and
+// can ask for a change, but nothing the model writes ever decides whether a change is inside them.
+//
+//   refundCapCents       the most the agent may refund in total
+//   planIncreaseCapCents the most the agent may raise the plan's total above where it stood when the limits were signed
+//   validUntil           epoch ms; after that every change waits for the person
+export const MANDATE_ACTIONS = ['release', 'allocate', 'refund'];
+
+const dollars = (c) => `$${(c / 100).toFixed(2)}`;
+
+export function defaultTerms({ planTotalCents, validUntil }) {
+  const whole = (c) => Math.round(c / 100) * 100;
+  return {
+    enabled: true,
+    refundCapCents: whole(planTotalCents * 0.25),
+    planIncreaseCapCents: whole(planTotalCents * 0.25),
+    validUntil,
+  };
+}
+
+export function normalizeTerms(raw, { maxValidUntil } = {}) {
+  const num = (v) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0) throw new Error('Limits must be amounts of $0 or more.');
+    return n;
+  };
+  if (raw.enabled === false) return { enabled: false, refundCapCents: 0, planIncreaseCapCents: 0, validUntil: 0 };
+  const validUntil = Math.round(Number(raw.validUntil));
+  if (!Number.isFinite(validUntil) || validUntil <= 0) throw new Error('Choose how long the limits last.');
+  return {
+    enabled: true,
+    refundCapCents: Math.min(num(raw.refundCapCents), 500000),
+    planIncreaseCapCents: Math.min(num(raw.planIncreaseCapCents), 500000),
+    validUntil: maxValidUntil ? Math.min(validUntil, maxValidUntil) : validUntil,
+  };
+}
+
+export const mandateDigest = (m) => sha256Hex(JSON.stringify({ trip: m.tripId, terms: m.terms, baseline: m.baselineTotalCents, proposal: m.proposalId }));
+
+export async function createMandate({ tripId, terms, baselineTotalCents, proposalId, now }) {
+  const m = { id: `m${now.toString(36)}`, tripId, terms, baselineTotalCents, proposalId, createdAt: now, used: { refundCents: 0 }, uses: [] };
+  m.digest = await mandateDigest(m);
+  return m;
+}
+
+export async function mandateIntact(m) {
+  return Boolean(m?.digest) && (await mandateDigest(m)) === m.digest;
+}
+
+// Is this change inside the signed limits? `facts` come from the engine, never from the model:
+//   actions, humanOnly (the change touches the budget), planAfterTotalCents, now
+export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now }) {
+  const reasons = [];
+  const refundCents = actions.filter((a) => a.type === 'refund').reduce((s, a) => s + a.cents, 0);
+  const planIncreaseCents = mandate ? planAfterTotalCents - mandate.baselineTotalCents : 0;
+  const remaining = mandate ? {
+    refundCents: Math.max(0, mandate.terms.refundCapCents - mandate.used.refundCents),
+    planIncreaseCents: mandate.terms.planIncreaseCapCents - Math.max(0, planIncreaseCents),
+  } : null;
+  if (!mandate || !mandate.terms?.enabled) {
+    reasons.push({ code: 'NO_MANDATE', text: 'You have not given the agent limits to work within.' });
+  } else {
+    if (now >= mandate.terms.validUntil) reasons.push({ code: 'MANDATE_EXPIRED', text: 'Your limits ran out, so every change waits for you.' });
+    if (mandate.used.refundCents + refundCents > mandate.terms.refundCapCents) {
+      reasons.push({ code: 'REFUND_OVER_LIMIT', text: `This refunds ${dollars(refundCents)}, but only ${dollars(remaining.refundCents)} of your ${dollars(mandate.terms.refundCapCents)} refund limit is left.` });
+    }
+    if (planIncreaseCents > mandate.terms.planIncreaseCapCents) {
+      reasons.push({ code: 'PLAN_INCREASE_OVER_LIMIT', text: `This raises the plan by ${dollars(planIncreaseCents)}, over your ${dollars(mandate.terms.planIncreaseCapCents)} limit.` });
+    }
+  }
+  if (actions.some((a) => a.type === 'hold')) reasons.push({ code: 'NEEDS_PAYPAL_APPROVAL', text: 'This needs a new PayPal hold, and only you can approve that in PayPal.' });
+  if (actions.some((a) => !MANDATE_ACTIONS.includes(a.type) && a.type !== 'hold')) reasons.push({ code: 'SETTLEMENT_IS_YOURS', text: 'Charging or releasing the trip hold at the end is always your decision.' });
+  if (humanOnly) reasons.push({ code: 'BUDGET_IS_YOURS', text: 'Only you can change your budget.' });
+  return { within: reasons.length === 0, reasons, refundCents, planIncreaseCents, remaining };
+}
+
+export function describeTerms(terms) {
+  if (!terms?.enabled) return 'The agent may not act on its own. Every change waits for your OK.';
+  return `The agent may refund up to ${dollars(terms.refundCapCents)} in total and raise the plan by up to ${dollars(terms.planIncreaseCapCents)}, until ${new Date(terms.validUntil).toISOString().slice(0, 10)}. Anything beyond that waits for you.`;
+}

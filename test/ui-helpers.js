@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { handleRequest } from '../src/api.js';
 import { createPayPal } from '../src/paypal.js';
-import { fakeEnv, fakePayPalFetch, SAMPLE_PLAN } from './helpers.js';
+import { fakeEnv, fakePayPalFetch, fakeSources, scriptedModel } from './helpers.js';
+import { PLAN, PLACES } from './storm.js';
 
 const PUBLIC = new URL('../public/', import.meta.url);
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
@@ -22,22 +23,21 @@ export function findChrome() {
   return candidates.find((c) => c && existsSync(c)) ?? null;
 }
 
-// The whole app on a local port: the real static files, the real routes, engine and ledger, with the model
-// and PayPal replaced at the edge (the PayPal fake answers in the shape of recorded sandbox responses).
-export async function startApp({ ttlMs = 60_000, change = null, vars = {} } = {}) {
-  const fake = fakePayPalFetch();
+// The whole app on a local port: the real static files, the real routes, engine, ledger, agent loop and alarm, with the
+// model, the forecast and place services and PayPal replaced at the edge (the PayPal fake answers in the shape of
+// recorded sandbox responses). `model` is a list of scripted steps for the agent, or a ready scripted model.
+export async function startApp({ ttlMs = 60_000, plan = PLAN, model = null, sources = fakeSources({ places: PLACES }), vars = {}, failOn = null } = {}) {
+  const fake = fakePayPalFetch({ failOn });
   const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
-  const ai = {
-    planTrip: async (_p, validate) => validate(SAMPLE_PLAN),
-    changeTrip: async (_plan, _t, validate) => validate(change ?? { summary: 'Done.', operations: [{ op: 'reprice', itemId: 'i2', amount: 150 }] }),
-  };
-  const { env } = fakeEnv({ ai, paypal, ttlMs, vars });
+  const ai = { planTrip: async (_p, validate) => validate(structuredClone(plan)) };
+  const run = typeof model === 'function' ? model : scriptedModel(model ?? [{ text: 'unused' }]);
+  const world = fakeEnv({ ai, paypal, ttlMs, vars, run, sources });
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith('/api/')) {
         const chunks = []; for await (const c of req) chunks.push(c);
-        const r = await handleRequest(new Request(`http://localhost${req.url}`, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), env);
+        const r = await handleRequest(new Request(`http://localhost${req.url}`, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) }), world.env, { paypal });
         res.writeHead(r.status, Object.fromEntries(r.headers));
         res.end(Buffer.from(await r.arrayBuffer()));
         return;
@@ -51,7 +51,13 @@ export async function startApp({ ttlMs = 60_000, change = null, vars = {} } = {}
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return { url: `http://127.0.0.1:${server.address().port}/`, fake, close: () => new Promise((resolve) => server.close(resolve)) };
+  return {
+    url: `http://127.0.0.1:${server.address().port}/`,
+    fake,
+    run,
+    world,
+    close: async () => { world.stop(); await new Promise((resolve) => server.close(resolve)); },
+  };
 }
 
 // Third-party scripts are replaced by tiny stand-ins so the browser test needs no network. The PayPal one
@@ -65,9 +71,9 @@ export async function openBrowser(puppeteer) {
   return { browser, close: async () => { await browser.close(); rmSync(userDataDir, { recursive: true, force: true }); } };
 }
 
-export async function newPage(browser) {
+export async function newPage(browser, { width = 1440, height = 900 } = {}) {
   const page = await browser.newPage();
-  await page.setViewport({ width: 1440, height: 900 });
+  await page.setViewport({ width, height });
   await page.setRequestInterception(true);
   page.on('request', (req) => {
     const u = req.url();

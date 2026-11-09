@@ -1,35 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPayPal } from '../src/paypal.js';
+import { createEngine } from '../src/engine.js';
 import { AIError } from '../src/ai.js';
 import { toCents } from '../src/domain/money.js';
 import { itemState, reserves, appendFact, reconcile } from '../src/domain/ledger.js';
-import { fakePayPalFetch, makeEngine, SAMPLE_PLAN } from './helpers.js';
+import { fakePayPalFetch, makeEngine, newTrip, checkoutAsBuyer, planner, SAMPLE_PLAN } from './helpers.js';
 
 const MONEY = /POST .*\/(orders|authorize|capture|void|refund)/;
 
+// These tests are about the money, so the agent is left out: a change is handed to the engine the way the agent hands
+// it over (submitEdit). With no limits signed (mandate disabled) every change waits for the person, as it did before
+// the agent existed.
 function setup({ failOn, skew } = {}) {
   const fake = fakePayPalFetch({ failOn, skew });
   const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
-  const script = { change: null, aiError: null };
-  const ai = {
-    planTrip: async (_p, validate) => validate(SAMPLE_PLAN),
-    changeTrip: async (_plan, _t, validate) => { if (script.aiError) throw script.aiError; return validate(script.change); },
-  };
-  return { fake, paypal, script, ...makeEngine({ ai, paypal }) };
+  return { fake, paypal, ...makeEngine({ ai: planner(), paypal }) };
 }
+const active = (ctx) => ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+const change = (ctx, ops) => ctx.engine.submitEdit({ ops, agentNote: 'note' });
 
-async function checkout(ctx) {
-  await ctx.engine.createTrip('t1', 'Lisbon');
-  const p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
-  await ctx.engine.confirm(p.id, p.digest);
-  const { orderId } = await ctx.engine.createOrder(p.id);
-  await ctx.engine.approveOrder(p.id, orderId);
-  return p.id;
+async function booked(ctx) {
+  await newTrip(ctx);
+  await ctx.engine.setMandateTerms({ enabled: false });
+  await checkoutAsBuyer(ctx);
 }
-
 async function confirmAndRun(ctx) {
-  const p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  const p = active(ctx);
   await ctx.engine.confirm(p.id, p.digest);
   if (p.actions.some((a) => a.type === 'hold')) {
     const { orderId } = await ctx.engine.createOrder(p.id);
@@ -38,9 +35,9 @@ async function confirmAndRun(ctx) {
   return p.id;
 }
 
-test('checkout places one trip reserve, allocates each item quota, and captures only prepaid lodging', async () => {
+test('checkout places one trip hold, sets money aside for each item, and charges only the prepaid lodging', async () => {
   const ctx = setup();
-  await checkout(ctx);
+  await booked(ctx);
   const s = ctx.store.peek();
   const states = Object.fromEntries(s.plan.items.map((i) => [i.title, itemState(s.ledger, i.id).status]));
   assert.deepEqual(states, { 'Alfama apartment (3 nights)': 'paid', 'Sunset boat tour': 'held', 'Sintra day trip': 'held' });
@@ -50,97 +47,78 @@ test('checkout places one trip reserve, allocates each item quota, and captures 
   assert.equal(res[0].capturedCents, 54000);
   assert.equal(res[0].heldCents, 30000);
   assert.equal(res[0].unusedCents, 0);
-  assert.equal(s.proposals[Object.keys(s.proposals)[0]].status, 'executed');
+  assert.equal(Object.values(s.proposals).at(-1).status, 'executed');
+  assert.match(res[0].expiresAt, /^\d{4}-\d{2}-\d{2}T/, 'the hold remembers when PayPal says it lapses');
 });
 
-test('weather change, refund, and close trip: quota release & allocation, new hold when reserve is exceeded, refund, and close-trip capture + void', async () => {
+test('weather change, refund, and close trip: money freed and set aside again, a new hold when the hold is exceeded, a refund, and the closing charges and release', async () => {
   const ctx = setup();
-  await checkout(ctx);
-  const plan = ctx.store.peek().plan;
-  const boat = plan.items.find((i) => i.title.includes('boat')).id;
+  await booked(ctx);
+  const boat = ctx.store.peek().plan.items.find((i) => i.title.includes('boat')).id;
 
-  // 1. Removing the $180 boat tour releases $180 quota back to the trip reserve (no PayPal void yet),
-  //    and adding a $66 oceanarium allocates from that $180 freed reserve without a new PayPal order.
-  ctx.script.change = {
-    summary: 'Storm on day 2: swapped the boat tour for the oceanarium.',
-    operations: [
-      { op: 'remove', itemId: boat },
-      { op: 'add', item: { day: 2, title: 'Oceanarium tickets', category: 'activity', amount: 66, participants: ['Ana', 'Ben', 'Cy'] } },
-    ],
-  };
-  await ctx.engine.requestChange('It will storm on Saturday');
-  let p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  // 1. Removing the $180 boat tour frees $180 inside the hold (no PayPal call), and a $66 oceanarium is set aside from it.
+  await change(ctx, [{ op: 'remove', itemId: boat }, { op: 'add', item: { day: 2, title: 'Oceanarium tickets', category: 'activity', amount: 66, participants: ['Ana', 'Ben', 'Cy'] } }]);
+  let p = active(ctx);
   assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['release', 18000], ['allocate', 6600]]);
   assert.equal(p.netCents, 6600 - 18000);
-  assert.equal(ctx.store.peek().plan.items.some((i) => i.title.includes('boat')), true, 'plan only changes once confirmed');
+  assert.equal(ctx.store.peek().plan.items.some((i) => i.title.includes('boat')), true, 'the plan only changes once confirmed');
 
   const voidCallsBefore = ctx.fake.calls.filter((c) => /\/void$/.test(c)).length;
   await confirmAndRun(ctx);
-  assert.equal(ctx.fake.calls.filter((c) => /\/void$/.test(c)).length, voidCallsBefore, 'removing an uncaptured item does not void the PayPal authorization');
+  assert.equal(ctx.fake.calls.filter((c) => /\/void$/.test(c)).length, voidCallsBefore, 'removing an uncharged item does not void the PayPal authorization');
 
   let s = ctx.store.peek();
   assert.equal(s.plan.items.some((i) => i.title.includes('boat')), false);
   assert.equal(itemState(s.ledger, boat).status, 'released');
   assert.equal(reserves(s.ledger)[0].unusedCents, 18000 - 6600);
 
-  // 2. Adding an item ($250 helicopter tour) that exceeds the $114 unused reserve requests a new PayPal authorization ('hold')
-  ctx.script.change = {
-    summary: 'Added a helicopter tour.',
-    operations: [{ op: 'add', item: { day: 3, title: 'Helicopter tour', category: 'activity', amount: 250, participants: ['Ana', 'Ben', 'Cy'] } }],
-  };
-  await ctx.engine.requestChange('Add a helicopter tour');
-  p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  // 2. A $250 helicopter tour is more than the $114 left in the hold: a new PayPal hold is needed.
+  await change(ctx, [{ op: 'add', item: { day: 3, title: 'Helicopter tour', category: 'activity', amount: 250, participants: ['Ana', 'Ben', 'Cy'] } }]);
+  p = active(ctx);
   assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['hold', 25000]]);
   await confirmAndRun(ctx);
   assert.equal(reserves(ctx.store.peek().ledger).length, 2);
 
-  // 3. Dropping the captured apartment triggers a PayPal refund
+  // 3. Dropping the charged apartment triggers a PayPal refund
   s = ctx.store.peek();
   const apt = s.plan.items.find((i) => i.category === 'lodging').id;
-  ctx.script.change = { summary: 'Staying with friends instead.', operations: [{ op: 'remove', itemId: apt }] };
-  await ctx.engine.requestChange('We found a free place to stay');
-  p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  await change(ctx, [{ op: 'remove', itemId: apt }]);
+  p = active(ctx);
   assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['refund', 54000]]);
   await confirmAndRun(ctx);
   assert.equal(itemState(ctx.store.peek().ledger, apt).status, 'refunded');
+  assert.ok(ctx.fake.refs.size === 1 && [...ctx.fake.refs.values()][0].note === 'Wayledger: your trip plan changed', 'PayPal gets fixed words, not text from a model');
 
-  // 4. Close trip: captures all remaining held items ($120 Sintra + $66 Oceanarium + $250 Helicopter) and voids the $114 unused reserve on AUTH1
+  // 4. Close trip: charges all remaining held items and releases the $114 left in the first hold
   await ctx.engine.closeTrip();
-  p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  p = active(ctx);
   assert.equal(p.kind, 'close');
-  assert.deepEqual(
-    p.actions.map((a) => [a.type, a.cents]),
-    [['capture', 6600], ['capture', 12000], ['capture', 25000], ['void', 11400]]
-  );
+  assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['capture', 6600], ['capture', 12000], ['capture', 25000], ['void', 11400]]);
   await confirmAndRun(ctx);
   s = ctx.store.peek();
-  for (const item of s.plan.items) {
-    assert.equal(itemState(s.ledger, item.id).status, 'paid');
-  }
+  for (const item of s.plan.items) assert.equal(itemState(s.ledger, item.id).status, 'paid');
   assert.equal(reserves(s.ledger).every((r) => !r.open), true);
   assert.equal(ctx.fake.auths.get(reserves(s.ledger)[0].id).status, 'VOIDED');
   const rec = await ctx.engine.reconcile();
   assert.equal(rec.allMatch, true, JSON.stringify(rec));
+  assert.equal(rec.planCheck.ok, true, 'the money follows the plan');
 });
 
 test('the ledger equals what PayPal reports both mid-trip and after closeTrip', async () => {
   const ctx = setup();
-  await checkout(ctx);
+  await booked(ctx);
   const boat = ctx.store.peek().plan.items.find((i) => i.title.includes('boat')).id;
   const apt = ctx.store.peek().plan.items.find((i) => i.category === 'lodging').id;
-  ctx.script.change = { summary: 'Cheaper flat, no boat.', operations: [{ op: 'remove', itemId: boat }, { op: 'reprice', itemId: apt, amount: 480 }] };
-  await ctx.engine.requestChange('Cheaper flat and skip the boat');
-  const p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  await change(ctx, [{ op: 'remove', itemId: boat }, { op: 'reprice', itemId: apt, amount: 480 }]);
+  const p = active(ctx);
   assert.deepEqual(p.actions.map((a) => [a.type, a.cents]).sort(), [['refund', 6000], ['release', 18000]]);
   await confirmAndRun(ctx);
 
-  // Mid-trip reconcile: Sintra is still HELD, AUTH1 is PARTIALLY_CAPTURED in PayPal
   const midRec = await ctx.engine.reconcile();
   assert.equal(midRec.allMatch, true, JSON.stringify(midRec));
   assert.equal(midRec.heldItemsCheck.length, 1);
   assert.equal(midRec.heldItemsCheck[0].valid, true);
 
-  // Close trip: captures Sintra ($120) and voids the $180 unused reserve on AUTH1
   await ctx.engine.closeTrip();
   await confirmAndRun(ctx);
   const endRec = await ctx.engine.reconcile();
@@ -149,49 +127,43 @@ test('the ledger equals what PayPal reports both mid-trip and after closeTrip', 
   for (const f of ctx.store.peek().ledger.filter((x) => x.op === 'refund')) assert.equal(f.cents, toCents(ctx.fake.refs.get(f.id).amount.value));
 });
 
-test('if PayPal answers with a different amount than confirmed, nothing is recorded or released', async () => {
-  const ctx = setup();
-  await ctx.engine.createTrip('t1', 'Lisbon');
-  const boatId = ctx.store.peek().plan.items.find((i) => i.title.includes('boat')).id;
+test('if PayPal answers with a different amount than confirmed, nothing is recorded and the unrequested hold is given back', async () => {
+  const probe = setup();
+  await newTrip(probe);
+  const boatId = probe.store.peek().plan.items.find((i) => i.title.includes('boat')).id;
   const skewed = setup({ skew: { [boatId]: '181.00' } });
-  await skewed.engine.createTrip('t1', 'Lisbon');
-  const p = skewed.store.peek().proposals[skewed.store.peek().activeProposal];
+  await newTrip(skewed);
+  await skewed.engine.setMandateTerms({ enabled: false });
+  const p = active(skewed);
   await skewed.engine.confirm(p.id, p.digest);
   const { orderId } = await skewed.engine.createOrder(p.id);
-  await assert.rejects(skewed.engine.approveOrder(p.id, orderId), /does not match the confirmed amount/);
+  await assert.rejects(skewed.engine.approveOrder(p.id, orderId), /does not match the confirmed amount.*released/s);
   assert.equal(skewed.store.peek().ledger.length, 0);
-  assert.equal(skewed.fake.calls.some((c) => /capture|void|refund/.test(c)), false);
+  assert.equal(skewed.fake.calls.some((c) => /capture|refund/.test(c)), false);
+  const voids = skewed.fake.calls.filter((c) => /authorizations\/\w+\/void$/.test(c));
+  assert.equal(voids.length, 1, 'the stray authorization was voided so nothing keeps holding the buyer\'s money');
+  assert.equal([...skewed.fake.auths.values()][0].status, 'VOIDED');
 });
 
-test('a model failure leaves the money alone and says why, and the person can retry', async () => {
-  const ctx = setup();
-  await checkout(ctx);
-  const before = ctx.fake.calls.filter((c) => MONEY.test(c)).length;
-  const ledgerBefore = structuredClone(ctx.store.peek().ledger);
-  ctx.script.aiError = new AIError('The planning model is unavailable right now.');
-  await assert.rejects(ctx.engine.requestChange('It will rain'), /unavailable/);
-  assert.equal(ctx.fake.calls.filter((c) => MONEY.test(c)).length, before);
-  assert.deepEqual(ctx.store.peek().ledger, ledgerBefore);
-  assert.match(ctx.store.peek().events.at(-1).text, /unavailable/);
-
-  ctx.script.aiError = null;
-  ctx.script.change = { summary: 'x', operations: [{ op: 'remove', itemId: 'does-not-exist' }] };
-  await assert.rejects(ctx.engine.requestChange('Drop the thing'), /unknown item/);
-  assert.equal(ctx.store.peek().activeProposal, null);
-  assert.equal(ctx.fake.calls.filter((c) => MONEY.test(c)).length, before);
+test('a planning failure leaves nothing behind', async () => {
+  const fake = fakePayPalFetch();
+  const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
+  const ctx = makeEngine({ ai: { planTrip: async () => { throw new AIError('The planning model is busy right now.'); } }, paypal });
+  await assert.rejects(newTrip(ctx), /busy/);
+  assert.equal(ctx.store.peek(), null);
+  assert.deepEqual(fake.calls.filter((c) => MONEY.test(c)), []);
 });
 
 test('a PayPal failure mid-way through closeTrip is reported, nothing is silently half-applied, and retry finishes it', async () => {
   const ctx = setup();
-  await checkout(ctx);
+  await booked(ctx);
   await ctx.engine.closeTrip();
 
-  // Make the second capture fail once
+  // Make the second charge fail once
   const real = ctx.fake.fetchImpl; let caps = 0; let broken = true;
   const flaky = async (url, init = {}) => (broken && init.method === 'POST' && /capture$/.test(new URL(url).pathname) && ++caps === 2 ? new Response(JSON.stringify({ name: 'X', message: 'Temporarily unavailable' }), { status: 503 }) : real(url, init));
-  const { createEngine } = await import('../src/engine.js');
-  const engine = createEngine({ store: ctx.store, paypal: createPayPal({ clientId: 'id', secret: 's', fetchImpl: flaky }), ai: { planTrip: async () => {}, changeTrip: async () => {} }, now: () => ctx.clock.t });
-  const p = ctx.store.peek().proposals[ctx.store.peek().activeProposal];
+  const engine = createEngine({ store: ctx.store, paypal: createPayPal({ clientId: 'id', secret: 's', fetchImpl: flaky }), ai: planner(), now: () => ctx.clock.t });
+  const p = active(ctx);
   const boat = ctx.store.peek().plan.items.find((i) => i.title.includes('boat')).id;
   const tour = ctx.store.peek().plan.items.find((i) => i.title.includes('Sintra')).id;
 
@@ -207,7 +179,7 @@ test('a PayPal failure mid-way through closeTrip is reported, nothing is silentl
   s = ctx.store.peek();
   assert.equal(s.proposals[p.id].status, 'executed');
   assert.equal(itemState(s.ledger, tour).status, 'paid');
-  assert.equal(s.ledger.filter((f) => f.op === 'capture' && f.itemId === boat).length, 1, 'retry must not capture twice');
+  assert.equal(s.ledger.filter((f) => f.op === 'capture' && f.itemId === boat).length, 1, 'retry must not charge twice');
 });
 
 test('reconcile flags a mismatch when PayPal authorization is VOIDED while items on it are still HELD', () => {
@@ -227,7 +199,7 @@ test('reconcile flags a mismatch when PayPal authorization is VOIDED while items
   const rec1 = reconcile(legacyLedger, remote);
   assert.equal(rec1.allMatch, false, 'must report mismatch when an item is HELD on a VOIDED PayPal authorization');
 
-  // 2. Reserve + quota model where PayPal authorization is VOIDED externally while an item is still HELD:
+  // 2. Hold + set-aside model where PayPal authorization is VOIDED externally while an item is still HELD:
   const reserveLedger = [];
   appendFact(reserveLedger, { op: 'authorize', itemId: '_reserve', id: '51U586321V080991T', orderId: '7TA63620MF0285309', status: 'CREATED', cents: 120000, at: 1 });
   appendFact(reserveLedger, { op: 'allocate', itemId: 'i1', id: '51U586321V080991T', status: 'ALLOCATED', cents: 60000, at: 1 });
@@ -240,4 +212,17 @@ test('reconcile flags a mismatch when PayPal authorization is VOIDED while items
   const rec2 = reconcile(reserveLedger, remote);
   assert.equal(rec2.allMatch, false, 'must report mismatch when PayPal says VOIDED while item i3 is still HELD');
   assert.equal(rec2.heldItemsCheck.find((h) => h.itemId === 'i3')?.valid, false);
+});
+
+test('the plan must be the money: an item with no funds or funds on a removed item is reported as a mismatch', async () => {
+  const ctx = setup();
+  await booked(ctx);
+  assert.equal((await ctx.engine.reconcile()).planCheck.ok, true);
+  const s = ctx.store.peek();
+  s.plan.items.push({ id: 'i9', day: 3, title: 'Ghibli Museum', category: 'activity', amountCents: 4000, participants: ['Ana'], prepaid: false });
+  await ctx.store.put(s);
+  const rec = await ctx.engine.reconcile();
+  assert.equal(rec.planCheck.ok, false);
+  assert.equal(rec.allMatch, false, 'a plan the money does not follow is not a clean ledger');
+  assert.deepEqual(rec.planCheck.mismatches.map((m) => [m.title, m.kind]), [['Ghibli Museum', 'unfunded']]);
 });

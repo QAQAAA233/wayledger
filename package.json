@@ -8,10 +8,13 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test test/*.test.js"
+    "test": "node --test --test-concurrency=1 --test-timeout=120000 test/*.test.js"
   },
   "devDependencies": {
     "puppeteer-core": "^25.16.0",
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "@paypal/agent-toolkit": "1.11.0"
   }
 }

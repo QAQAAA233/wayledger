@@ -93,6 +93,7 @@ export function reserves(ledger) {
       id: authId,
       seq: authFacts[0]?.seq ?? 0,
       orderId: authFacts[0]?.orderId ?? null,
+      expiresAt: authFacts[0]?.expiresAt ?? null,
       authorizedCents,
       capturedCents,
       heldCents,
@@ -104,6 +105,25 @@ export function reserves(ledger) {
       captures,
     };
   });
+}
+
+// "The money follows the plan": once the trip is booked, every priced item must have exactly its planned amount
+// held or paid (net of refunds), free items nothing, and nothing may be left on an item that is no longer in the plan.
+export function planFundingCheck(plan, ledger) {
+  if (ledger.length === 0) return { applicable: false, ok: true, mismatches: [] };
+  const mismatches = [];
+  for (const item of plan.items) {
+    const st = itemState(ledger, item.id);
+    const funded = st.heldCents + st.paidCents;
+    if (funded !== item.amountCents) mismatches.push({ itemId: item.id, title: item.title, plannedCents: item.amountCents, fundedCents: funded, kind: funded === 0 ? 'unfunded' : 'different' });
+  }
+  const inPlan = new Set(plan.items.map((i) => i.id));
+  for (const id of new Set(ledger.map((f) => f.itemId).filter((x) => x && x !== '_reserve'))) {
+    if (inPlan.has(id)) continue;
+    const st = itemState(ledger, id);
+    if (st.heldCents + st.paidCents !== 0) mismatches.push({ itemId: id, title: id, plannedCents: 0, fundedCents: st.heldCents + st.paidCents, kind: 'orphaned' });
+  }
+  return { applicable: true, ok: mismatches.length === 0, mismatches };
 }
 
 export function ledgerTotals(ledger) {
@@ -124,7 +144,7 @@ export function ledgerTotals(ledger) {
 //    and verify that if any item is HELD on it, the authorization is still active in PayPal.
 // 2. Every Capture: check status (COMPLETED / REFUNDED / PARTIALLY_REFUNDED) and amount.
 // 3. Every Refund: check status (COMPLETED) and amount.
-export function reconcile(ledger, remote) {
+export function reconcile(ledger, remote, plan = null) {
   const rows = [];
   const res = reserves(ledger);
 
@@ -228,9 +248,11 @@ export function reconcile(ledger, remote) {
     return r.heldItems.map((h) => ({ itemId: h.itemId, heldCents: h.cents, authId: r.id, paypalAuthStatus: remoteStatus, valid }));
   });
 
+  const planCheck = plan ? planFundingCheck(plan, ledger) : { applicable: false, ok: true, mismatches: [] };
   return {
     rows,
     heldItemsCheck,
-    allMatch: rows.every((r) => r.match) && heldItemsCheck.every((h) => h.valid),
+    planCheck,
+    allMatch: rows.every((r) => r.match) && heldItemsCheck.every((h) => h.valid) && planCheck.ok,
   };
 }

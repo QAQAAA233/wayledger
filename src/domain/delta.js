@@ -1,16 +1,17 @@
-import { CAPTURE_AT_BOOKING } from './plan.js';
 import { itemState, reserves } from './ledger.js';
 
 // Deterministic money delta between the current plan and a staged plan.
-// One PayPal authorization is a Trip Reserve; each item holds a quota under a reserve.
+// One PayPal authorization is a trip hold; each item has money set aside for it under a hold.
 //
 // Action types:
-// - 'hold': open a new PayPal authorization reserve (requires buyer approval) and allocate item quota
-// - 'allocate': allocate item quota from an existing open Trip Reserve (no new PayPal approval needed)
-// - 'release': release uncaptured item quota back to its Trip Reserve (no PayPal call; unused reserve is voided at trip close)
-// - 'capture': capture held item quota from its Trip Reserve in PayPal (at trip close)
-// - 'void': void remaining unused Trip Reserve in PayPal (at trip close)
-// - 'refund': refund a captured charge in PayPal
+// - 'hold': open a new PayPal authorization (requires buyer approval) and set money aside for the item
+// - 'allocate': set money aside for the item from an existing open hold (no new PayPal approval needed)
+// - 'release': free money set aside for an item back into its hold (no PayPal call; the unused hold is voided at trip close)
+// - 'capture': charge held money for an item in PayPal (at trip close)
+// - 'void': release the remaining unused hold in PayPal (at trip close)
+// - 'refund': refund a charged amount in PayPal
+export const PAYPAL_CHARGE_TYPES = ['hold', 'capture', 'refund'];
+
 export function diffToActions(oldPlan, newPlan, ledger) {
   const actions = [];
   const oldById = new Map(oldPlan.items.map((i) => [i.id, i]));
@@ -22,15 +23,23 @@ export function diffToActions(oldPlan, newPlan, ledger) {
       .map((r) => [r.id, r.unusedCents])
   );
 
-  const releaseQuota = (item, st, why) => {
+  // A refund can never exceed the charge it comes from, so a larger amount is split over the item's charges.
+  const refund = (item, st, cents, why) => {
+    let left = cents;
+    for (const c of st.captures) {
+      const take = Math.min(c.cents - c.refunded, left);
+      if (take > 0) actions.push({ type: 'refund', itemId: item.id, title: item.title, cents: take, captureId: c.id, why });
+      left -= take;
+      if (left <= 0) break;
+    }
+  };
+
+  const releaseAll = (item, st, why) => {
     for (const a of st.openAuths) {
       actions.push({ type: 'release', itemId: item.id, title: item.title, cents: a.cents, authId: a.id, why });
       availByAuth.set(a.id, (availByAuth.get(a.id) ?? 0) + a.cents);
     }
-    for (const c of st.captures) {
-      const left = c.cents - c.refunded;
-      if (left > 0) actions.push({ type: 'refund', itemId: item.id, title: item.title, cents: left, captureId: c.id, why });
-    }
+    refund(item, st, st.paidCents, why);
   };
 
   const assignQuota = (item, cents, captureAfter, baseWhy) => {
@@ -44,7 +53,7 @@ export function diffToActions(oldPlan, newPlan, ledger) {
           cents,
           authId,
           captureAfter,
-          why: `${baseWhy} (covered by existing trip reserve)`,
+          why: `${baseWhy} (covered by existing trip hold)`,
         });
         return;
       }
@@ -63,45 +72,52 @@ export function diffToActions(oldPlan, newPlan, ledger) {
     const st = itemState(ledger, old.id);
     const now = newById.get(old.id);
     if (!now) {
-      releaseQuota(old, st, 'removed from the plan — quota freed in trip reserve (unused reserve is voided at trip close)');
-    } else if (now.amountCents !== old.amountCents && st.status !== 'planned') {
+      releaseAll(old, st, 'removed from the plan');
+    } else if (now.amountCents === 0 && st.status !== 'planned') {
+      releaseAll(now, st, 'now free');
+    } else if (now.amountCents !== old.amountCents) {
       if (st.heldCents > 0) {
         if (now.amountCents < st.heldCents) {
           let toRelease = st.heldCents - now.amountCents;
           for (const a of st.openAuths) {
             if (toRelease <= 0) break;
             const cut = Math.min(a.cents, toRelease);
-            actions.push({ type: 'release', itemId: old.id, title: now.title, cents: cut, authId: a.id, why: 'price dropped: quota freed in trip reserve' });
+            actions.push({ type: 'release', itemId: old.id, title: now.title, cents: cut, authId: a.id, why: 'price dropped' });
             availByAuth.set(a.id, (availByAuth.get(a.id) ?? 0) + cut);
             toRelease -= cut;
           }
         } else if (now.amountCents > st.heldCents) {
-          assignQuota(now, now.amountCents - st.heldCents, CAPTURE_AT_BOOKING.has(now.category), 'price rose: additional quota');
+          assignQuota(now, now.amountCents - st.heldCents, now.prepaid, 'price rose');
         }
-      } else if (now.amountCents < st.paidCents) {
-        const cap = st.captures.find((c) => c.cents - c.refunded > 0);
-        actions.push({ type: 'refund', itemId: old.id, title: now.title, cents: st.paidCents - now.amountCents, captureId: cap.id, why: 'price dropped: refund the difference' });
-      } else if (now.amountCents > st.paidCents) {
-        assignQuota(now, now.amountCents - st.paidCents, true, 'price rose: charge the difference');
+      } else if (st.paidCents > 0) {
+        if (now.amountCents < st.paidCents) refund(now, st, st.paidCents - now.amountCents, 'price dropped: refund the difference');
+        else if (now.amountCents > st.paidCents) assignQuota(now, now.amountCents - st.paidCents, true, 'price rose: charge the difference');
+      } else if (now.amountCents > 0 && ledger.length > 0) {
+        // nothing held or paid yet (it was free, or its money was freed): it gets money set aside like a new item
+        assignQuota(now, now.amountCents, now.prepaid, 'now has a price');
       }
     }
   }
   for (const now of newPlan.items) {
-    if (!oldById.has(now.id)) {
-      assignQuota(now, now.amountCents, CAPTURE_AT_BOOKING.has(now.category), 'added to the plan');
-    }
+    if (!oldById.has(now.id) && now.amountCents > 0) assignQuota(now, now.amountCents, now.prepaid, 'added to the plan');
   }
   return actions;
 }
 
-// First checkout: open a Trip Reserve covering every planned item and allocate each item's quota.
-export function checkoutActions(plan, ledger) {
-  return plan.items
-    .filter((i) => itemState(ledger, i.id).status === 'planned')
-    .map((i) => ({ type: 'hold', itemId: i.id, title: i.title, cents: i.amountCents, captureAfter: CAPTURE_AT_BOOKING.has(i.category), why: 'initial trip reserve & item quota' }));
+// The buffer is the part of the first hold that no item owns yet: money the person lets the agent use for changes
+// without asking PayPal again. It is released at the end if unused.
+export const BUFFER_ID = '_buffer';
+
+// First checkout: open a trip hold covering every priced item (and the buffer) and set each item's money aside.
+export function checkoutActions(plan, ledger, bufferCents = 0) {
+  const actions = plan.items
+    .filter((i) => i.amountCents > 0 && itemState(ledger, i.id).status === 'planned')
+    .map((i) => ({ type: 'hold', itemId: i.id, title: i.title, cents: i.amountCents, captureAfter: i.prepaid, why: 'initial trip hold and money set aside for the item' }));
+  if (actions.length > 0 && bufferCents > 0) actions.push({ type: 'hold', itemId: BUFFER_ID, title: 'Buffer for changes', cents: bufferCents, captureAfter: false, why: 'money the agent may use for changes without asking PayPal again' });
+  return actions;
 }
 
-// Close trip: capture every remaining held item in the plan, then void any unused reserve in PayPal.
+// Close trip: charge every remaining held item in the plan, then void any unused hold in PayPal.
 export function closeActions(plan, ledger) {
   const actions = [];
   for (const item of plan.items) {
@@ -127,10 +143,10 @@ export function closeActions(plan, ledger) {
       actions.push({
         type: 'void',
         itemId: '_reserve',
-        title: `Unused trip reserve (${r.id})`,
+        title: `Unused trip hold (${r.id})`,
         cents: leftover,
         authId: r.id,
-        why: 'void remaining unused trip reserve in PayPal',
+        why: 'release the remaining unused trip hold in PayPal',
       });
     } else if (leftover === 0 && capturingNow > 0) {
       const lastCap = [...actions].reverse().find((a) => a.type === 'capture' && a.authId === r.id);
@@ -140,7 +156,7 @@ export function closeActions(plan, ledger) {
   return actions;
 }
 
-// Net effect on committed trip budget: positive = more committed/charged, negative = quota released or money returned.
+// Net effect on committed trip budget: positive = more committed/charged, negative = money set aside freed or returned.
 export function netCents(actions) {
   return actions.reduce((a, x) => a + (['hold', 'allocate', 'capture'].includes(x.type) ? x.cents : -x.cents), 0);
 }

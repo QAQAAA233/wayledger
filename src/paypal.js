@@ -3,11 +3,18 @@ import { toCents, fromCents } from './domain/money.js';
 // Thin PayPal REST client. Every method returns ledger facts built from what PayPal
 // answered (re-read from PayPal after each write), never from what we asked for.
 export class PayPalError extends Error {
-  constructor(message, { status, name, debugId, details } = {}) {
+  constructor(message, { status, name, debugId, details, issue } = {}) {
     super(message);
-    this.status = status; this.paypalName = name; this.debugId = debugId; this.details = details;
+    this.status = status; this.paypalName = name; this.debugId = debugId; this.details = details; this.issue = issue;
   }
 }
+
+// PayPal's own wording for the failures a traveler can fix, in words a traveler can use. Anything else keeps PayPal's text.
+const ISSUE_WORDS = {
+  INSTRUMENT_DECLINED: 'PayPal could not use that payment method. Choose another one and try again.',
+  PAYER_ACTION_REQUIRED: 'PayPal needs you to finish approving before the hold can be placed.',
+  ORDER_NOT_APPROVED: 'The order was not approved in PayPal yet.',
+};
 
 export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.paypal.com', fetchImpl = fetch }) {
   let token = null;
@@ -33,7 +40,7 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
       const issue = json.details?.[0]?.issue;
-      throw new PayPalError(`PayPal: ${json.message ?? res.statusText}${issue ? ` (${issue})` : ''}`, { status: res.status, name: json.name, debugId: res.headers.get('paypal-debug-id'), details: json.details });
+      throw new PayPalError(ISSUE_WORDS[issue] ?? `PayPal: ${json.message ?? res.statusText}${issue ? ` (${issue})` : ''}`, { status: res.status, name: json.name, debugId: res.headers.get('paypal-debug-id'), details: json.details, issue });
     }
     return json;
   }
@@ -84,7 +91,7 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
         items = fullOrder.purchase_units?.[0]?.items;
       }
       const full = await call('GET', `/v2/payments/authorizations/${auth.id}`);
-      const authFact = fact('authorize', '_reserve', full, { orderId, proposalId });
+      const authFact = fact('authorize', '_reserve', full, { orderId, proposalId, expiresAt: full.expiration_time ?? null });
       const itemBreakdown = items?.map((it) => ({ itemId: it.sku, cents: toCents(it.unit_amount.value) })) ?? null;
       return { authFact, itemBreakdown };
     },
@@ -105,6 +112,19 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
       const r = await call('POST', `/v2/payments/captures/${captureId}/refund`, { amount: amount(cents), note_to_payer: (note ?? 'Trip plan changed').slice(0, 255) }, requestId);
       const full = await call('GET', `/v2/payments/refunds/${r.id}`);
       return fact('refund', itemId, full, { parentId: captureId, proposalId });
+    },
+
+    // Webhooks: PayPal checks its own signature for us. Anything but SUCCESS is a forgery or a replay.
+    async verifyWebhook(body) {
+      const r = await call('POST', '/v1/notifications/verify-webhook-signature', body);
+      return r.verification_status === 'SUCCESS';
+    },
+
+    // Follows a link PayPal put in an event (for example a refund's link up to its charge). Only PayPal's own payments API.
+    async getByLink(href) {
+      const url = new URL(href);
+      if (!href.startsWith(`${base.replace('api-m.', 'api.')}/v2/payments/`) && !href.startsWith(`${base}/v2/payments/`)) throw new PayPalError('That link is not a PayPal payments link.');
+      return call('GET', url.pathname);
     },
 
     // Used by reconcile: what does PayPal say right now about every PayPal id in the ledger?
