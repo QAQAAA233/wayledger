@@ -73,7 +73,7 @@ export async function runBaseline(sc, wd, { run, model }) {
   const s0 = await facade.state();
   const ctx = {
     runId: 'baseline', now: () => wd.clock.t, sources: fakeSources({ forecasts: sc.forecasts, places: sc.places }), seenPlaces: new Map(), simulated: new Map(), simulatedForecast: null,
-    userText: `${sc.trigger.message ?? ''}\n${s0.documents.map((d) => d.text).join('\n')}`,
+    travelerText: sc.trigger.message ?? '', // the traveler's own words, as in the product; pasted documents are not their words
     readState: () => facade.state(), simulate: (ops) => facade.simulate(ops),
     recordPolicy: (raw) => facade.mutate('recordPolicy', [raw]), submitEdit: (payload) => facade.mutate('submitEdit', [payload]),
   };
@@ -131,7 +131,7 @@ export async function runOracle(sc, wd, which = 'oracle') {
   const s0 = await facade.state();
   const ctx = {
     runId: 'oracle', now: () => wd.clock.t, sources: fakeSources({ forecasts: sc.forecasts, places: sc.places }), seenPlaces: new Map(), simulated: new Map(), simulatedForecast: null,
-    userText: `${sc.trigger.message ?? ''}\n${s0.documents.map((d) => d.text).join('\n')}`,
+    travelerText: sc.trigger.message ?? '', // the traveler's own words, as in the product; pasted documents are not their words
     readState: () => facade.state(), simulate: (ops) => facade.simulate(ops),
     recordPolicy: (raw) => facade.mutate('recordPolicy', [raw]), submitEdit: (payload) => facade.mutate('submitEdit', [payload]),
   };

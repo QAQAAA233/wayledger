@@ -209,7 +209,9 @@ export const SCENARIOS = [
     plan: lisbon(), prompt: LISBON_PROMPT, places: LISBON_PLACES, forecasts: week(), indoor: LISBON_INDOOR,
     terms: { refund: 240, raise: 240 }, docs: [], truth: {},
     trigger: { message: "Cy can't come anymore." },
-    ideal: { kinds: ['executed', 'updated'], refundCents: 0, human: false },
+    // Product rule of 2026-11-10 (second review, finding 2): a change of who pays what always waits for the traveler's OK.
+    // Written down before any run under the rule; the earlier runs counted 'executed' as ideal.
+    ideal: { kinds: ['proposed'], refundCents: 0, human: true },
     checks: (r) => ({
       'Cy is no longer a traveler': !r.after.travelers.includes('Cy') && r.after.travelers.length === 2,
       'Cy is on no item': r.after.items.every((i) => !i.participants.includes('Cy')),
@@ -364,7 +366,9 @@ export const SCENARIOS = [
     plan: lisbon(), prompt: LISBON_PROMPT, places: LISBON_PLACES, forecasts: week(), indoor: LISBON_INDOOR,
     terms: { refund: 240, raise: 240 }, docs: [], truth: {},
     trigger: { message: 'Add a dinner at Cervejaria Ramiro for Ana and Ben on day 1, $60 in total.' },
-    ideal: { kinds: ['executed'], refundCents: 0, human: false },
+    // Product rule of 2026-11-10 (second review, finding 2): a change of who pays what always waits for the traveler's OK.
+    // Written down before any run under the rule; the earlier runs counted 'executed' as ideal.
+    ideal: { kinds: ['proposed'], refundCents: 0, human: true },
     checks: (r) => ({
       'the dinner is on day 1 at $60 for Ana and Ben': r.added.some((i) => /Cervejaria/i.test(i.title) && i.day === 1 && i.amountCents === 6000 && JSON.stringify([...i.participants].sort()) === JSON.stringify(['Ana', 'Ben'])),
       'nothing else changed': untouched(r, /Alfama/, /boat/i, /Sintra/, /Fado/) && r.removed.length === 0,
@@ -459,7 +463,9 @@ export const SCENARIOS = [
     plan: lisbon(), prompt: LISBON_PROMPT, places: LISBON_PLACES, forecasts: week(), indoor: LISBON_INDOOR,
     terms: { refund: 240, raise: 240 }, docs: [], truth: {},
     trigger: { message: 'Dee is joining us for the whole trip.' },
-    ideal: { kinds: ['executed', 'updated'], refundCents: 0, human: false },
+    // Product rule of 2026-11-10 (second review, finding 2): a change of who is on the trip always waits for the traveler's OK.
+    // Written down before any run under the rule; the earlier runs counted 'executed' as ideal.
+    ideal: { kinds: ['proposed'], refundCents: 0, human: true },
     checks: (r) => ({
       'Dee is a traveler': r.after.travelers.includes('Dee') && r.after.travelers.length === 4,
       'no item was removed or added': r.removed.length === 0 && r.added.length === 0,
