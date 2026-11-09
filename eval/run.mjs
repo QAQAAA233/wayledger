@@ -31,7 +31,7 @@ console.log(`tag=${tag} approaches=${approaches} models=${models} reps=${reps} s
 const FILES = ['src/agent/prompts.js', 'src/agent/tools.js', 'src/agent/loop.js', 'src/agent/schema.js', 'src/agent/model.js', 'src/domain/policy.js', 'src/domain/mandate.js', 'src/domain/delta.js', 'src/engine.js', 'eval/world.mjs', 'eval/scenarios.mjs'];
 const hashes = Object.fromEntries(FILES.map((f) => [f, createHash('sha256').update(fs.readFileSync(f)).digest('hex').slice(0, 16)]));
 let commit = null; let dirty = null;
-try { commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim(); dirty = execSync('git status --porcelain -- src eval', { encoding: 'utf8' }).trim().length > 0; } catch { /* not a git checkout */ }
+try { commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim(); dirty = execSync('git status --porcelain -- src eval ":!eval/results"', { encoding: 'utf8' }).trim().length > 0; } catch { /* not a git checkout */ }
 const metaFile = path.join(root, tag, 'meta.json');
 if (!fs.existsSync(metaFile)) fs.writeFileSync(metaFile, JSON.stringify({ tag, startedAt: new Date().toISOString(), commit, uncommittedChangesInSrcOrEval: dirty, approaches, models, reps, split: args.split ?? 'all', fileHashes: hashes }, null, 1));
 const jobs = [];

@@ -18,13 +18,16 @@ function readToken() {
 export class Spend {
   constructor(file, capUsd) {
     this.file = file; this.capUsd = capUsd;
-    this.data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { neurons: 0, calls: 0, byTag: {} };
+    const d = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+    // eval/spend.mjs rewrites the file from the run records (several runs at once overwrite each other's counters)
+    this.data = { neurons: d.neurons ?? (d.totalUsd ? d.totalUsd / NEURON_USD : 0), calls: d.calls ?? 0, byTag: d.byTag ?? {} };
     this.dirty = 0;
   }
   get usd() { return this.data.neurons * NEURON_USD; }
   add(tag, model, neurons) {
     this.data.neurons += neurons; this.data.calls += 1;
     const t = (this.data.byTag[tag] ??= { neurons: 0, calls: 0, byModel: {} });
+    t.calls ??= 0; t.byModel ??= {};
     t.neurons += neurons; t.calls += 1; t.byModel[model] = (t.byModel[model] ?? 0) + neurons;
     if (++this.dirty >= 10) this.save();
     if (this.usd >= this.capUsd) { this.save(); throw Object.assign(new Error(`The evaluation spend cap of $${this.capUsd} was reached ($${this.usd.toFixed(3)}).`), { code: 'BUDGET_CAP' }); }

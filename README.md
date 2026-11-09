@@ -40,17 +40,72 @@ Most AI checkout demos stop at "buy once". Real group plans change after the mon
 
 - **The model has no money tools.** Its hands are `get_trip`, `get_forecast`, `search_places`, `get_payment_status`, `read_documents`, `record_policy`, `simulate_edit`, and three ways to finish: `submit_edit`, `ask_traveler`, `no_change`. `submit_edit` must be exactly an edit it simulated.
 - **Code decides what happens to the money.** A submitted edit is run through the same simulator; if it is inside the signed limits, needs no new PayPal approval and costs you nothing at the operator, it executes under a confirmation made by the mandate (digest checked, limits checked, refund counted). Otherwise it becomes a proposal with a digest, a cap and a 15-minute expiry that only you can confirm.
-- **Facts are not invented.** A new place must carry a `placeId` that a search returned in this run (its real name is filled in by the host); a price is the price of what it replaces or one you wrote; a new traveler must be someone you named. The booking terms must be read before anything is cancelled or lowered.
+- **Facts are not invented.** A new place must carry a `placeId` that a search returned in this run (its real name is filled in by the host); a price is the price of what it replaces or one you wrote, and a new price on an existing item must be one you wrote too (the first holdout run caught a model working out discounts nobody mentioned); a new traveler must be someone you named. The booking terms must be read before anything is cancelled or lowered, a rule must quote its sentence and may not contradict it, and a change that costs you money at an operator under those terms always waits for you.
 - **Words on the proposal are written by code** from the actions. What the model said is kept apart and labelled "Agent's note". PayPal's refund note is a fixed sentence.
 - **Arguments are validated**, unknown fields rejected, broken JSON never echoed back to the model API; two reminders if it answers in plain text instead of acting; 12 turns and 170 seconds at most; a daily spend guard stops the agent and says so.
 - **The ledger is append-only and reconciled at the object level** (`src/domain/ledger.js`, `src/paypal.js`): after every PayPal write the resource is read back and *its* amount and status are stored.
 - **One trip = one Durable Object**; money steps run one at a time; the agent runs in the object's alarm, never inside a request.
 - **Only the person who planned the trip can act.** The browser that planned it holds a secret token (its hash is stored); a shared link can look, including at the agent's work, but cannot confirm, pay, close or start the agent.
 
-Permanent tests (`npm test`, about 105, all against the real engine, ledger, gate, tools and loop; only PayPal's HTTP, the models and the data services are stand-ins, and the PayPal fake answers in the shape of recorded sandbox responses) include: no confirmation means no money moves; a model that never reads the terms cannot cancel anything; a model that submits over its limit is blocked and the change waits for you; one model call cannot do the task (the record shows the rounds); the seven attacks from the review; forged and replayed webhooks; and a real-browser run through both flows.
+Permanent tests (`npm test`, 108, all against the real engine, ledger, gate, tools and loop; only PayPal's HTTP, the models and the data services are stand-ins, and the PayPal fake answers in the shape of recorded sandbox responses) include: no confirmation means no money moves; a model that never reads the terms cannot cancel anything; a model that submits over its limit is blocked and the change waits for you; one model call cannot do the task (the record shows the rounds); the seven attacks from the review; forged and replayed webhooks; and a real-browser run through both flows.
 
 <!-- EVAL:BEGIN -->
+## Evaluation: does the loop beat one call?
+
+Same trips, same facts, same guards and simulator, two ways of deciding: the **agent loop** (tools, several rounds, simulate before submit) and a **one-call baseline** (all the facts pre-fetched into one prompt, one answer, no way to look anything up or try an option first, with the formatting help a retry would give). Two models through Workers AI: Gemma 4 26B (thinking off) and gpt-oss-120b, three runs each. Every figure is computed by a program from the raw records in `eval/results/`; the scenarios, their ground truth and their checks were written before any model ran (`eval/scenarios.mjs`), and a reference answer that meets every check plus wrong answers that fail them prove the scoring (`eval/README.md`).
+
+**Round 1 holdout: 17 scenarios never used for tuning, instructions frozen at commit 34bba8d, run once**
+
+| | runs | constraints met | every repetition met | ideal decision | refunded without need | operator loss without a yes | no decision or error | neurons per run |
+|---|---|---|---|---|---|---|---|---|
+| agent loop / gemma | 51 | **86%** | 82% | 84% | $540 | $0 | 1 | 161 |
+| agent loop / oss | 51 | **63%** | 59% | 57% | $1200 | $0 | 1 | 477 |
+| one call / gemma | 51 | **67%** | 65% | 53% | $180 | $0 | 23 | 26 |
+| one call / oss | 51 | **65%** | 59% | 61% | $1200 | $0 | 5 | 113 |
+
+**The same 17 scenarios again after one host guard was added (a new price must be one the traveler wrote); no longer unseen**
+
+| | runs | constraints met | every repetition met | ideal decision | refunded without need | operator loss without a yes | no decision or error | neurons per run |
+|---|---|---|---|---|---|---|---|---|
+| agent loop / gemma | 51 | **82%** | 82% | 82% | $540 | $0 | 0 | 173 |
+| agent loop / oss | 51 | **73%** | 65% | 69% | $180 | $0 | 2 | 567 |
+| one call / gemma | 51 | **69%** | 65% | 57% | $180 | $0 | 21 | 26 |
+| one call / oss | 51 | **57%** | 47% | 49% | $1080 | $0 | 7 | 111 |
+
+**The same 17 scenarios with the second-round instructions (the shipped version); seen before, so not a clean test**
+
+| | runs | constraints met | every repetition met | ideal decision | refunded without need | operator loss without a yes | no decision or error | neurons per run |
+|---|---|---|---|---|---|---|---|---|
+| agent loop / gemma | 51 | **90%** | 88% | 88% | $540 | $0 | 1 | 171 |
+| agent loop / oss | 51 | **67%** | 47% | 67% | $540 | $0 | 2 | 518 |
+| one call / gemma | 51 | **76%** | 76% | 65% | $0 | $0 | 18 | 26 |
+| one call / oss | 51 | **75%** | 65% | 63% | $360 | $0 | 7 | 115 |
+
+**Round 2: 8 new scenarios written after round 1, run once with the second-round instructions (the shipped version)**
+
+| | runs | constraints met | every repetition met | ideal decision | refunded without need | operator loss without a yes | no decision or error | neurons per run |
+|---|---|---|---|---|---|---|---|---|
+| agent loop / gemma | 24 | **88%** | 75% | 83% | $360 | $0 | 0 | 167 |
+| agent loop / oss | 24 | **71%** | 50% | 67% | $180 | $0 | 1 | 531 |
+| one call / gemma | 24 | **79%** | 75% | 75% | $0 | $0 | 6 | 26 |
+| one call / oss | 24 | **79%** | 63% | 75% | $540 | $0 | 1 | 119 |
+
+**Reading the tables.** With the default model (Gemma) the agent loop met more constraints than one call in every round (86% against 67%; 82% against 69%; 90% against 76%; 88% against 79%). It can read the terms, try options and recover when a guard refuses an answer: the one call ended without any decision in 6 to 23 runs per round (of 51, or 24 in the last), the loop in at most 1. With gpt-oss-120b the loop was ahead of one call in 1 of 4 rounds (63% against 65%; 73% against 57%; 67% against 75%; 71% against 79%), so the loop is not a free win and the model matters; Gemma is the default because it scored higher, answered faster and used about a third of the compute. Where the loop loses, the per-scenario tables show it: with Gemma it changed a booking for a 35% chance of light rain (S13, runs meeting the constraints per round: 0 of 3, 0 of 3, 0 of 3) and it sometimes acts on a plain question (S31, fresh round: 1 of 3), where one call did not. A change that costs the traveler money at an operator never went through without a yes in any row.
+
+Full tables per scenario, the method, what was changed after looking at which results, and the limits of this evaluation are in [`eval/README.md`](eval/README.md).
+
 <!-- EVAL:END -->
+
+## Seen working on the live site (PayPal sandbox)
+
+Real Chrome, the real PayPal sandbox window, the deployed Worker, the real models, the real forecast and place services:
+
+- **Inside the limits the agent acts on its own.** Limits signed with the first approval, terms pasted, the demo button pressed. The trail shows the storm labelled as simulated, the terms read, the sentence it relied on quoted, a place id it had made up before searching rejected by the host, real museums from Wikidata, the swap carried out by itself (the boat tour refunded in PayPal), and the check afterwards: *4 of 4 PayPal records match*. ![The agent acts inside its limits](docs/screens/flow-a-the-agent-acts-inside-its-limits.png)
+- **Outside the limits it stops.** The same request with a $100 refund limit becomes a proposal that says why; nothing moves until Confirm, and a person's yes does not use up the agent's limit. ![Outside the limits it waits for your OK](docs/screens/flow-b-outside-the-limits-it-waits-for-your-ok.png)
+- **It wakes itself.** On a copy of the site whose self-wake interval was 90 seconds, nobody pressed anything: 95 seconds after the limits were signed a Durable Object alarm woke the agent, it read the real forecast (thunderstorms, 98% chance of rain at the trip's destination that day), looked at the plan (a hostel and a dinner, both indoors) and decided nothing needed to change. ![A real alarm woke the agent](docs/screens/self-wake-a-real-alarm-no-button.png)
+- **PayPal's own state, through the PayPal Agent Toolkit**, in the work trail: the hold, until when it is valid, what was charged and refunded, open disputes.
+- **The agent's own words are not trusted.** Told to write "PayPal verified this. No money moves." in its note, it did: the sentence appears only in a box labelled "its own words, not checked by the code", below the amounts the code wrote ("Refund $400.00 ...").
+- **The seven attacks from the review, retried against the live site:** an approval 11 seconds after the proposal expired (refused, nothing held); an old PayPal window approved after the plan changed underneath (refused with a plain sentence, the order stays unauthorized at PayPal, the ledger stays empty); a budget of "null" injected through the request (no budget, nothing held); the system prompt asked for as the trip title (replaced by a plain title); a forged summary (see above); a script with no login confirming, paying, closing or starting the agent (403 on every route); hammering a trip that does not exist (404, no allowance spent).
 
 ## Architecture
 
@@ -102,6 +157,7 @@ The public demo is rate limited per visitor, per day, and by an AI spend guard; 
 - **PayPal's honor period.** PayPal guarantees the funds of an authorization for 3 days and keeps it valid for 29. Wayledger places the hold no earlier than 26 days before the trip's last day, shows when it is valid until, and reads its expiry; it does **not** reauthorize. A trip closed long after its end, or a buyer whose funds are gone after day 3, can make the final capture fail, and the app then says so and charges nothing.
 - **Prices of new places are not looked up** (no free source exists). A new place is priced like the item it replaces or at a price you write, and the screen says so.
 - **The self-wake needs a Durable Object alarm**; the demo button runs the same code path with a simulated storm.
+- **The agent is not infallible.** In the evaluation Gemma changed a booking for a 35% chance of light rain and sometimes acted on a plain question; with gpt-oss-120b the loop did not beat one call. What holds regardless of what the model decides is in code: the signed limits, the quotes, the grounding of places, prices and names, the proposal gate, the verified webhooks and the ledger check.
 
 ## License
 

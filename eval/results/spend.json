@@ -1,78 +1,90 @@
 {
- "neurons": 133967.80012083054,
- "calls": 2211,
+ "note": "Gross Workers AI cost in US dollars before the 10,000 free neurons a day, recomputed from the run records by eval/spend.mjs",
  "byTag": {
   "dev0": {
-   "neurons": 4991.749555587769,
-   "calls": 105,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 1725.5816249847412,
-    "@cf/openai/gpt-oss-120b": 3266.1679306030273
-   }
-  },
-  "schema_probe": {
-   "neurons": 708.3999228477478,
-   "calls": 90,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 708.3999228477478
-   }
+   "runs": 28,
+   "neurons": 4992,
+   "usd": 0.055
   },
   "dev1": {
-   "neurons": 5663.863845825195,
-   "calls": 96,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 1779.2452697753906,
-    "@cf/openai/gpt-oss-120b": 3884.6185760498047
-   }
+   "runs": 28,
+   "neurons": 5664,
+   "usd": 0.062
   },
   "dev2": {
-   "neurons": 5118.235336303711,
-   "calls": 180,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 5118.235336303711
-   }
+   "runs": 42,
+   "neurons": 5118,
+   "usd": 0.056
   },
   "dev3": {
-   "neurons": 20208.138555526733,
-   "calls": 303,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 3938.8166790008545,
-    "@cf/openai/gpt-oss-120b": 16269.321876525879
-   }
+   "runs": 84,
+   "neurons": 20208,
+   "usd": 0.222
   },
   "dev4": {
-   "neurons": 7684.076238632202,
-   "calls": 92,
-   "byModel": {
-    "@cf/openai/gpt-oss-120b": 6216.1855545043945,
-    "@cf/google/gemma-4-26b-a4b-it": 1467.8906841278076
-   }
+   "runs": 24,
+   "neurons": 7684,
+   "usd": 0.085
   },
-  "holdout1": {
-   "neurons": 39640.138617515564,
-   "calls": 616,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 9549.052664756775,
-    "@cf/openai/gpt-oss-120b": 30091.08595275879
-   }
-  },
-  "holdout2": {
-   "neurons": 29719.008771896362,
-   "calls": 440,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 7286.508024215698,
-    "@cf/openai/gpt-oss-120b": 22432.500747680664
-   }
+  "dev5": {
+   "runs": 42,
+   "neurons": 4705,
+   "usd": 0.052
   },
   "fresh1": {
-   "neurons": 20234.18927669525,
-   "calls": 289,
-   "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 4648.026656150818,
-    "@cf/openai/gpt-oss-120b": 15586.162620544434
-   }
+   "runs": 96,
+   "neurons": 20234,
+   "usd": 0.223
+  },
+  "holdout1": {
+   "runs": 204,
+   "neurons": 39640,
+   "usd": 0.436
+  },
+  "holdout2": {
+   "runs": 204,
+   "neurons": 44749,
+   "usd": 0.492
+  },
+  "holdout3": {
+   "runs": 204,
+   "neurons": 42342,
+   "usd": 0.466
+  },
+  "negative": {
+   "runs": 6,
+   "neurons": 0,
+   "usd": 0
+  },
+  "negative2": {
+   "runs": 6,
+   "neurons": 0,
+   "usd": 0
+  },
+  "negative3": {
+   "runs": 3,
+   "neurons": 0,
+   "usd": 0
+  },
+  "oracle": {
+   "runs": 24,
+   "neurons": 0,
+   "usd": 0
+  },
+  "oracle2": {
+   "runs": 24,
+   "neurons": 0,
+   "usd": 0
+  },
+  "oracle3": {
+   "runs": 32,
+   "neurons": 0,
+   "usd": 0
   }
  },
- "usd": 1.4736,
- "capUsd": 2.5
+ "schemaProbes": {
+  "neurons": 1450,
+  "usd": 0.016
+ },
+ "totalUsd": 2.17
 }
