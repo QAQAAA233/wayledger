@@ -481,11 +481,12 @@ function ledgerCard() {
   const r = S.recon;
   const paypalCount = t.ledger.filter((f) => PAYPAL_OPS.includes(f.op)).length;
   const quotaCount = t.ledger.length - paypalCount;
-  const ok = r && r.allMatch;
+  const diffs = r ? r.rows.filter((x) => !x.match).length + (r.heldItemsCheck?.filter((h) => !h.valid).length ?? 0) : 0;
+  const ok = r && diffs === 0 && (t.closed || r.allMatch);
   const verifyLine = r
     ? (ok
-      ? `<span class="ok">Ledger matches PayPal: ${r.rows.length}/${r.rows.length} PayPal records verified${r.planCheck?.applicable ? '. Every item has the money the plan says.' : '.'}</span>`
-      : `<span class="bad">${r.rows.filter((x) => !x.match).length + (r.heldItemsCheck?.filter((h) => !h.valid).length ?? 0)} difference(s) from PayPal${r.planCheck?.ok === false ? `; the plan and the money disagree on ${esc(r.planCheck.mismatches.map((m) => m.title).join(', '))}` : ''}</span>`)
+      ? `<span class="ok">Ledger matches PayPal: ${r.rows.length}/${r.rows.length} PayPal records verified${t.closed ? '. Final settlement complete: only completed items were charged, and unspent holds were released.' : (r.planCheck?.applicable ? '. Every item has the money the plan says.' : '.')}</span>`
+      : `<span class="bad">${diffs} difference(s) from PayPal${r.planCheck?.ok === false ? `; the plan and the money disagree on ${esc(r.planCheck.mismatches.map((m) => m.title).join(', '))}` : ''}</span>`)
     : '<span style="color:var(--muted)">Every PayPal record here was copied from PayPal\'s own answer. Verify asks PayPal again.</span>';
   const rows = S.tab === 'budget' ? Math.max(3, t.plan.items.length + t.removedItems.length) : Math.max(3, S.tab === 'paypal' ? paypalCount : quotaCount);
   const holds = t.reserves.filter((x) => x.open && x.expiresAt).map((x) => `valid until ${esc(dayDate(Date.parse(x.expiresAt)))}`)[0];
