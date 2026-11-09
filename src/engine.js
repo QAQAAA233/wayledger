@@ -6,6 +6,7 @@ import { createMandate, evaluateMandate, defaultTerms, normalizeTerms, describeT
 import { describeAction, describeEffect, paypalEffect, proposalSummary } from './domain/describe.js';
 import { validatePolicyFact, operatorLoss, MAX_DOC_CHARS, PolicyError } from './domain/policy.js';
 import { budgetFromText, sharesLongRun } from './domain/facts.js';
+import { describeAuthority } from './domain/authority.js';
 
 // One trip = one object = one truth. `store` holds a single JSON state; `paypal` and `ai` are injected so the same
 // rules run in the Durable Object and in the permanent tests. Nothing a model writes is ever an approval: a change
@@ -358,6 +359,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       confirmation: p.confirmation ? { by: p.confirmation.by, at: p.confirmation.at } : null,
       lines: p.actions.map((a) => ({ type: a.type, text: describeAction(a), cents: a.cents })),
       effectText: describeEffect(p.actions),
+      ...(p.authority ? { basisText: describeAuthority(p.authority) } : {}),
       mostCanMoveCents: paypalEffect(p.actions).mostCanMoveCents,
       failed: p.status === 'failed',
     };
@@ -472,7 +474,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
 
     // What the agent decided, handed to code. Inside the signed limits it runs at once; otherwise it becomes a
     // proposal that waits for the person. Either way the proposal's words are written here, not by the model.
-    async submitEdit({ ops, agentNote = null, runId = null }) {
+    async submitEdit({ ops, agentNote = null, runId = null, authority }) {
       const s = await load();
       mustBeOpen(s);
       assertNoFailed(s);
@@ -494,7 +496,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         return { outcome: 'updated', money: false, summary };
       }
       // After it, every change is a proposal, also one that moves no money: the signed limits confirm it, or a person does.
-      const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
+      const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source, authority, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
       if (sim.mandate.within) {
         await confirmByMandate(p, s.mandate, sim.mandate, now());
         s.mandate.used.cancelledCents += sim.mandate.cancelledCents;
@@ -588,7 +590,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         // is not a yes: the new proposal waits for the person (or the signed limits do not apply to it at all).
         const a = assess(s, p.newPlan);
         const lossLines = lossLinesOf(a.losses);
-        const np = await fresh(s, 'change', proposalSummary('change', s.plan, p.newPlan), a.actions, p.newPlan, { agentNote: p.agentNote, source: p.source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
+        const np = await fresh(s, 'change', proposalSummary('change', s.plan, p.newPlan), a.actions, p.newPlan, { agentNote: p.agentNote, source: p.source, authority: p.authority, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
         np.outside = a.mandate.reasons;
       }
       log(s, 'system', 'Amounts were worked out again from the current trip. Nothing was sent to the model.');

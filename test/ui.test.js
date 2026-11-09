@@ -2,7 +2,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { findChrome, startApp, openBrowser, newPage } from './ui-helpers.js';
 import { scriptedModel } from './helpers.js';
-import { stormSteps, dropSteps } from './storm.js';
+import { stormSteps, dropSteps, BY_THRESHOLD } from './storm.js';
 
 // Real Chrome against the real page, routes, engine, agent loop and alarm. Only the model, the forecast and place
 // services, PayPal's HTTP and the two CDN scripts are stand-ins (see ui-helpers.js). The buyer is played by calling the
@@ -55,7 +55,8 @@ async function pasteTermsAndTeachModel(page, holder) {
   await page.click('[data-act="terms-sample"]');
   const line = (await page.$eval('#terms', (el) => el.value)).split('\n')[0];
   const [, date, hour] = /until (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/.exec(line);
-  holder.run = scriptedModel(stormSteps({ quote: line.replace(/, after that.*$/, ''), until: `${date}T${hour}` }));
+  // The demo button wakes the agent with a made-up storm: the weather limit the traveler signed is what backs its change.
+  holder.run = scriptedModel(stormSteps({ quote: line.replace(/, after that.*$/, ''), until: `${date}T${hour}`, authority: BY_THRESHOLD }));
   await page.click('[data-act="terms-save"]');
   await page.waitForSelector('.doc');
   return line;
@@ -72,7 +73,7 @@ test('after the plan is drawn the PayPal button is on the page within 5 seconds,
     assert.match(await text(page, '.budget'), /\$1,200\.00.*from your own words/);
     assert.match(await text(page, '#budget-why'), /The plan uses \$840\.00 of it on purpose: the rest is room for changes\./, 'the traveler can see why the plan does not use the whole budget');
     const limits = await page.$$eval('#mandate-form input[type=number]', (els) => els.map((e) => e.value));
-    assert.deepEqual(limits, ['210', '210'], 'a quarter of the plan, offered and editable');
+    assert.deepEqual(limits, ['210', '210', '70', '50'], 'a quarter of the plan, then the rain and wind the agent acts on at its own check: offered and editable');
     assert.match(await text(page, '.proposal'), /Most that can move in PayPal/);
     assert.match(await text(page, '#mandate-form'), /buffer for changes/i);
     await noJargon(page, 'the booking card');
@@ -99,6 +100,10 @@ test('Flow A: the agent wakes, reads the terms, quotes the sentence, finds a rea
     assert.match(trail, /Searched for museum places/);
     assert.match(trail, /Electricity Museum, National Archaeology Museum/);
     assert.match(trail, /Tried option A/);
+    assert.match(trail, /Compared 2 options/, 'the options it weighed are on the trail');
+    assert.match(trail, /A \(chosen\)[\s\S]*Electricity Museum[\s\S]*B Remove Sunset boat tour/);
+    assert.match(trail, /Chose A: The boat tour is free to cancel/, 'with its reason');
+    assert.match(trail, /Rests on \(checked by the code\): The forecast for day 2 .* says 85% chance of rain, at or above the 70% limit you signed\. SIMULATED/, 'and what the move rests on');
     assert.match(trail, /Chose an option/);
     assert.match(trail, /Inside your limits, so it went ahead/);
     assert.match(trail, /\d+ of \d+ PayPal records match/);
@@ -140,6 +145,7 @@ test('Flow B: the same request outside the limits stops, moves nothing and shows
     assert.match(card, /Why the agent did not just do it/);
     assert.match(card, /only \$100\.00 of your \$100\.00 refund limit is left/);
     assert.match(card, /refund \$180\.00/i);
+    assert.match(card, /What this change rests on[\s\S]*85% chance of rain, at or above the 70% limit you signed/i);
     assert.doesNotMatch(await text(page, '#trail'), /Checked PayPal against the ledger/);
     await noJargon(page, 'the waiting proposal');
 
@@ -379,7 +385,8 @@ test('cancelling something the terms make non-refundable waits for the person, a
     { calls: [{ name: 'read_documents', args: {} }] },
     ({ messages }) => ({ calls: [{ name: 'record_policy', args: { docId: 'd1', itemId: boatId(messages), quote: SENTENCE, nonRefundable: true } }] }),
     ({ messages }) => ({ calls: [{ name: 'simulate_edit', args: { remove: [boatId(messages)] } }] }),
-    ({ messages }) => ({ calls: [{ name: 'submit_edit', args: { remove: [boatId(messages)], summary: 'Removed the boat tour.', reason: 'Storm.' } }] }),
+    ({ messages }) => ({ calls: [{ name: 'simulate_edit', args: { remove: [JSON.parse(messages.find((x) => x.role === 'tool').content).items.find((i) => /Sintra/i.test(i.title)).id] } }] }),
+    ({ messages }) => ({ calls: [{ name: 'submit_edit', args: { remove: [boatId(messages)], summary: 'Removed the boat tour.', reason: 'Storm.', authority: { source: 'traveler', quote: 'Cancel the boat tour' } } }] }),
   ]);
   await withApp({ model }, async (page, app) => {
     await booked(page);
@@ -392,6 +399,7 @@ test('cancelling something the terms make non-refundable waits for the person, a
     await page.waitForSelector('.proposal .notice.waits', { timeout: 10000 });
     const card = await text(page, '.proposal');
     assert.match(card, /What this would cost you at the operator/);
+    assert.match(card, /You wrote: “Cancel the boat tour”/, 'the card says what the change rests on');
     assert.match(card, /Sunset boat tour: \$180\.00 \(the terms say it is non-refundable\)/);
     assert.ok(card.includes(`“${SENTENCE}”`), 'the sentence is on the card');
     assert.match(card, /By your terms this would cost you \$180\.00 that the operator keeps, so it needs your OK/);

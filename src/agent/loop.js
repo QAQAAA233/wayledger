@@ -75,6 +75,7 @@ export async function runAgentLoop({ system, userMessage, tools, ctx, run, model
       } catch (e) {
         out = { result: { error: `The tool failed: ${String(e.message).slice(0, 160)}` }, event: { title: `${res.calls[i].name} failed`, detail: String(e.message).slice(0, 160), rejected: true } };
       }
+      if (out.compare) await emit({ kind: 'compare', ...out.compare });
       if (out.decision) await emit({ kind: 'decision', ...out.decision });
       if (out.event) await emit({ kind: 'tool', tool: res.calls[i].name, ms: now() - t0, ...out.event });
       messages.push({ role: 'tool', tool_call_id: ids[i], content: JSON.stringify(out.result).slice(0, 6000) });

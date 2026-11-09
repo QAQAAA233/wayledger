@@ -205,7 +205,7 @@ function saveTerms() {
 function saveMandate() {
   const f = document.getElementById('mandate-form');
   const enabled = f.elements.enabled.checked;
-  const body = enabled ? { enabled, refundCap: Number(f.elements.refund.value), planIncreaseCap: Number(f.elements.raise.value), validUntil: f.elements.until.value } : { enabled: false };
+  const body = enabled ? { enabled, refundCap: Number(f.elements.refund.value), planIncreaseCap: Number(f.elements.raise.value), rainPct: Number(f.elements.rain.value), windKph: Number(f.elements.wind.value), validUntil: f.elements.until.value } : { enabled: false };
   const go = () => run('Updating the limits...', async () => { setTrip(await api(`/trips/${S.trip.id}/mandate`, 'POST', body)); S.mandateForm = null; }, go, 'proposal');
   return go();
 }
@@ -333,7 +333,8 @@ function budgetForm(p) {
 function mandateEditor(p) {
   const t = p.mandateTerms ?? { enabled: false, refundCapCents: 0, planIncreaseCapCents: 0, validUntil: Date.now() };
   // numbers typed but not applied yet stay on the screen until the person applies them
-  const d = S.mandateForm ?? { enabled: t.enabled, refund: Math.round(t.refundCapCents / 100), raise: Math.round(t.planIncreaseCapCents / 100), until: new Date(t.validUntil || Date.now()).toISOString().slice(0, 10) };
+  const w = t.weather ?? { rainPct: 70, windKph: 50 };
+  const d = S.mandateForm ?? { enabled: t.enabled, refund: Math.round(t.refundCapCents / 100), raise: Math.round(t.planIncreaseCapCents / 100), rain: w.rainPct, wind: w.windKph, until: new Date(t.validUntil || Date.now()).toISOString().slice(0, 10) };
   const buffer = p.actions.find((a) => a.itemId === '_buffer');
   return `<form class="mandate" id="mandate-form">
     <label class="check"><input type="checkbox" name="enabled" ${d.enabled ? 'checked' : ''}> <b>Let the agent make changes on its own, inside these limits</b></label>
@@ -341,6 +342,10 @@ function mandateEditor(p) {
       <label class="date">Cancel or refund up to $ <input type="number" name="refund" min="0" step="1" value="${esc(d.refund)}"></label>
       <label class="date">Raise the plan by up to $ <input type="number" name="raise" min="0" step="1" value="${esc(d.raise)}"></label>
       <label class="date">Until <input type="date" name="until" value="${esc(d.until)}"></label>
+    </div>
+    <div class="row">
+      <label class="date">When it wakes on its own, act on the weather from <input type="number" name="rain" min="1" max="100" step="1" value="${esc(d.rain)}">% chance of rain</label>
+      <label class="date">or wind of <input type="number" name="wind" min="1" max="200" step="1" value="${esc(d.wind)}"> km/h</label>
       <button class="btn small ghost" type="button" data-act="mandate-save" ${S.busy ? 'disabled' : ''}>Update limits</button>
     </div>
     <div class="notice" id="mandate-dirty" ${S.mandateForm ? '' : 'hidden'}>These numbers are not applied yet. Press <b>Update limits</b>, then approve in PayPal.</div>
@@ -361,6 +366,7 @@ function proposalCard() {
   const loss = p.operatorLoss?.length ? `<div class="notice waits"><b>What this would cost you at the operator</b><ul>${p.operatorLoss.map((l) => `<li>${esc(l.title)}: ${usd(l.lossCents)} (${esc(l.why)})${l.quote ? `<blockquote>&ldquo;${esc(l.quote)}&rdquo; <small>from your terms</small></blockquote>` : ''}</li>`).join('')}</ul></div>` : '';
   const shares = p.shares ? `<div class="notice"><b>Who pays what after this change</b><ul>${p.shares.map((s) => `<li>${esc(s.name)}: ${usd(s.after)}${s.before === s.after ? '' : ` (now ${usd(s.before)})`}</li>`).join('')}</ul></div>` : '';
   const note = p.agentNote ? `<div class="agentnote"><b>Agent's note (its own words, not checked by the code)</b> ${esc(p.agentNote)}</div>` : '';
+  const basis = p.basisText ? `<div class="agentnote basis"><b>What this change rests on (checked by the code)</b> ${esc(p.basisText)}</div>` : '';
   let action;
   if (!owner) action = '<div class="hint">Only the person who planned this trip can confirm it.</div>';
   else if (expired) {
@@ -375,7 +381,7 @@ function proposalCard() {
     <ul class="acts">${p.lines.map((l) => `<li class="${l.type}"><span>${esc(l.text)}</span></li>`).join('')}</ul>
     <div class="effect">${esc(p.effectText)}</div>
     ${unfunded}${shares}${loss}${why}
-    ${note}
+    ${basis}${note}
     <div class="sumline"><span>Most that can move in PayPal: <b>${usd(p.mostCanMoveCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
     ${p.kind === 'checkout' && owner && !t.ledger.length ? mandateEditor(p) : ''}
     ${action}
@@ -395,12 +401,14 @@ function failedCard() {
 
 function eventHtml(e) {
   if (e.kind === 'model') return '';
-  const label = e.kind === 'tool' ? (TOOL_LABEL[e.tool] ?? 'Tool') : { wake: 'Start', decision: 'Decision', result: 'Result', paypal_check: 'PayPal', guard: 'Check', note: 'Note', model_error: 'Model' }[e.kind] ?? e.kind;
+  const label = e.kind === 'tool' ? (TOOL_LABEL[e.tool] ?? 'Tool') : { wake: 'Start', compare: 'Compare', decision: 'Decision', result: 'Result', paypal_check: 'PayPal', guard: 'Check', note: 'Note', model_error: 'Model' }[e.kind] ?? e.kind;
   const cls = ['ev', e.kind, e.rejected ? 'rej' : '', e.simulated ? 'sim' : '', e.waiting ? 'wait' : '', e.failed ? 'bad' : '', e.ok === true ? 'good' : ''].filter(Boolean).join(' ');
   return `<li class="${cls}"><span class="evtag">${esc(label)}</span><div class="evb">
     <div class="evt">${esc(e.title)}${e.simulated ? ' <span class="simbadge">SIMULATED</span>' : ''}</div>
     ${e.detail ? `<div class="evd">${e.agentReason ? '<i>Agent\'s reason:</i> ' : ''}${esc(e.detail)}</div>` : ''}
     ${e.note ? `<div class="evd"><i>Agent's note to you:</i> ${esc(e.note)}</div>` : ''}
+    ${e.basis ? `<div class="evd basis"><i>Rests on (checked by the code):</i> ${esc(e.basis)}</div>` : ''}
+    ${e.options ? `<ul class="opts">${e.options.map((o) => `<li class="${o.chosen ? 'chosen' : ''}"><b>${esc(o.option)}${o.chosen ? ' (chosen)' : ''}</b> ${esc(o.text)}<span class="evs">${[`refund ${usd(Math.round(o.refundUsd * 100))}`, `charge ${usd(Math.round(o.chargeUsd * 100))}`, o.lossUsd == null ? null : `costs you at the operator ${usd(Math.round(o.lossUsd * 100))}`, o.within == null ? null : o.within ? 'inside your limits' : 'beyond your limits'].filter(Boolean).join(', ')}</span></li>`).join('')}</ul>` : ''}
     ${e.quote ? `<blockquote>&ldquo;${esc(e.quote)}&rdquo; <small>from your terms</small></blockquote>` : ''}
     ${e.source ? `<div class="evs">Source: ${esc(e.source)}</div>` : ''}
   </div></li>`;
@@ -613,7 +621,7 @@ $app.addEventListener('input', (e) => {
   if (e.target.id === 'budget') S.budgetDraft = e.target.value;
   if (e.target.closest?.('#mandate-form')) {
     const f = document.getElementById('mandate-form');
-    S.mandateForm = { enabled: f.elements.enabled.checked, refund: f.elements.refund.value, raise: f.elements.raise.value, until: f.elements.until.value };
+    S.mandateForm = { enabled: f.elements.enabled.checked, refund: f.elements.refund.value, raise: f.elements.raise.value, rain: f.elements.rain.value, wind: f.elements.wind.value, until: f.elements.until.value };
     document.getElementById('mandate-dirty')?.removeAttribute('hidden');
   }
 });

@@ -22,19 +22,20 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). All
 | **Webhooks** | PayPal events are believed only after PayPal itself verified the signature, and they are kept on the trip. A signed "authorization voided" for a hold the ledger shows open is recorded by code (the ledger, a banner, a button for a new hold); no model is woken for it. |
 | **Evaluation** | 24 changing scenarios, an agent loop against a one-call baseline, two models, three runs each, numbers computed by a program from raw logs (`eval/`). |
 
-## The money, unchanged and still verified
+## The money: pay only for what happens
 
-Most AI checkout demos stop at "buy once". Real group plans change after the money is committed. Wayledger models a PayPal authorization as a **Trip Reserve** and items as quotas under it, covering the full payment lifecycle with zero mismatch between the screen and PayPal:
+Most AI checkout demos stop at "buy once". Real group plans change after the money is committed. Wayledger models a PayPal authorization as a **Trip Reserve** and items as quotas under it, covering the full payment lifecycle with zero mismatch between the screen and PayPal. Instead of charging everything upfront and issuing refunds later, **nothing is charged until its scheduled day**, and the final charge releases the rest:
 
 | Moment | Action & PayPal call | Who decides |
 |---|---|---|
 | First checkout: place the Trip Reserve (plus a buffer for changes, as big as the raise you allow) | `POST /v2/checkout/orders` (`intent: AUTHORIZE`) then `/authorize` | You approve in PayPal; the limits are signed with it |
-| Items paid in advance | `POST /v2/payments/authorizations/{id}/capture` (`final_capture: false`) | Confirmed amounts |
-| A held item is removed, or an addition that is not paid in advance fits the buffer | Money is set aside or freed inside the hold; PayPal does not move | Inside your limits: the agent. Otherwise: you |
-| Something paid in advance is added, or the price of a paid item rises | `POST /v2/payments/authorizations/{id}/capture`: a real charge | Always you |
-| A captured item is removed or gets cheaper | `POST /v2/payments/captures/{id}/refund`, split per capture | Inside your limits: the agent. Otherwise: you |
+| Items paid in advance | `POST /v2/payments/authorizations/{id}/capture` (`final_capture: false`) only if marked prepaid | Confirmed amounts |
+| Each item on its day (`chargesOn`) | `POST /v2/payments/authorizations/{id}/capture` (`final_capture: false` or `true` if last) | The schedule's check / alarm |
+| A held item is removed before its day, or an addition fits the buffer | Money is set aside or released inside the hold; PayPal does not move (no charge, no refund) | Inside your limits: the agent. Otherwise: you |
+| Something paid in advance is added, or the price of an already-charged item rises | `POST /v2/payments/authorizations/{id}/capture`: a real charge | Always you |
+| An item already charged or paid in advance is cancelled or lowered | `POST /v2/payments/captures/{id}/refund`, split per capture | Inside your limits: the agent. Otherwise: you |
 | A change needs more than the hold has | A new PayPal authorization | Always you, in PayPal |
-| **Close trip** | Capture what is kept, void the unused hold | Always you |
+| **Last charge or Close trip** | `POST /v2/payments/authorizations/{id}/capture` (`final_capture: true` releases the rest); or `void` if no charge was made | Alarm / You |
 | "Does the ledger match PayPal?" | Read every authorization, capture and refund back from PayPal, and check that every item has the money the plan says | Anyone, one click, and the agent after it acted |
 
 ## How the agent is kept honest
@@ -49,7 +50,7 @@ Most AI checkout demos stop at "buy once". Real group plans change after the mon
 - **Only the person who planned the trip can act.** The browser that planned it holds a secret token (its hash is stored); a shared link can look, including at the agent's work, but cannot confirm, pay, close or start the agent, and does not show the pasted documents, the sentences quoted from them or PayPal's events.
 - **A hold PayPal no longer has is not a dead end.** If a hold is voided in PayPal or runs out, the ledger records it as PayPal's doing, says which items have no money behind them, and offers a new hold for exactly those; closing the trip works too (`test/p4-lost-hold.test.js`).
 
-Permanent tests (`npm test`, 155, all against the real engine, ledger, gate, tools and loop; only PayPal's HTTP, the models and the data services are stand-ins, and the PayPal fake answers in the shape of recorded sandbox responses) include: no confirmation means no money moves; a model that never reads the terms cannot cancel anything; a model that submits over its limit is blocked and the change waits for you; one model call cannot do the task (the record shows the rounds); the seven attacks from the review and the second review's findings (a charge is never made on a yes the person did not give, pasted documents are not the traveler's words, a hold PayPal cancelled is not a dead end); forged and replayed webhooks; and a real-browser run through both flows.
+Permanent tests (`npm test`, 182, all against the real engine, ledger, gate, tools and loop; only PayPal's HTTP, the models and the data services are stand-ins, and the PayPal fake answers in the shape of recorded sandbox responses) include: no confirmation means no money moves; a model that never reads the terms cannot cancel anything; a model that submits over its limit is blocked and the change waits for you; one model call cannot do the task (the record shows the rounds); the seven attacks from the review and the second review's findings (a charge is never made on a yes the person did not give, pasted documents are not the traveler's words, a hold PayPal cancelled is not a dead end); forged and replayed webhooks; and a real-browser run through both flows.
 
 <!-- EVAL:BEGIN -->
 ## Evaluation: does the loop beat one call?
@@ -158,7 +159,7 @@ The public demo is rate limited per visitor, per day, and by an AI spend guard; 
 ## Known limits
 
 - **Sandbox only; one payer.** The trip's shares are computed per person, but one PayPal account holds the money.
-- **PayPal's honor period.** PayPal guarantees the funds of an authorization for 3 days and keeps it valid for 29. Wayledger places the hold no earlier than 26 days before the trip's last day, shows when it is valid until, and reads its expiry; it does **not** reauthorize. A trip closed long after its end, or a buyer whose funds are gone after day 3, can make the final capture fail, and the app then says so and charges nothing.
+- **PayPal's honor period and reauthorization.** PayPal guarantees the funds of an authorization for 3 days (the honor period); captures after that are subject to risk and funds availability. Reauthorization can be done only once, between day 4 and day 29, and is not implemented in Wayledger. The hard upper limit on any authorization is 29 days. Wayledger places the hold no earlier than 26 days before the trip's last day, shows when it is valid until, and reads its expiry. A trip closed long after its end, or a buyer whose funds are gone after day 3, can make the final capture fail, and the app then says so and charges nothing.
 - **Prices of new places are not looked up** (no free source exists). A new place is priced like the item it replaces or at a price you write, and the screen says so.
 - **The self-wake needs a Durable Object alarm**; the demo button runs the same code path with a simulated storm.
 - **The agent is not infallible.** In the evaluation Gemma changed a booking for a 35% chance of light rain and sometimes acted on a plain question; with gpt-oss-120b the loop did not beat one call. What holds regardless of what the model decides is in code: the signed limits, the quotes, the grounding of places, prices and names, the proposal gate, the verified webhooks and the ledger check.

@@ -140,6 +140,11 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .ev { display: grid; grid-template-columns: 74px 1fr; gap: 8px; padding: 8px 10px; background: var(--surface-2); border-radius: 10px; border-left: 3px solid var(--line); }
 .ev.tool { border-left-color: var(--released); }
 .ev.decision { border-left-color: var(--accent); background: var(--accent-soft); }
+.ev.compare { border-left-color: var(--accent); }
+.opts { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: .86rem; }
+.opts li { padding: 4px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.opts li.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.opts .evs { display: block; }
 .ev.result { border-left-color: var(--paid); }
 .ev.result.wait { border-left-color: var(--held); }
 .ev.rej, .ev.bad { border-left-color: var(--danger); }

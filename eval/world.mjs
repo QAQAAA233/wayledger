@@ -9,6 +9,7 @@ import { createTools, runTool, toolDefs, canon } from '../src/agent/tools.js';
 import { callModel, neuronsOf } from '../src/agent/model.js';
 import { parseArgs, validate } from '../src/agent/schema.js';
 import { quoteIn } from '../src/domain/facts.js';
+import { DEFAULT_WEATHER } from '../src/domain/mandate.js';
 import { userMessageFor } from '../src/agent/prompts.js';
 import { fakePayPalFetch, fakeEnv, fakeSources, planner, untilRunDone } from '../test/helpers.js';
 import { NOW, START } from './scenarios.mjs';
@@ -16,7 +17,14 @@ import { NOW, START } from './scenarios.mjs';
 const must = (r) => { if (!r.ok) throw new Error(`setup failed: ${JSON.stringify(r.e ?? r)}`); return r; };
 const PAYPAL_OPS = ['authorize', 'capture', 'refund'];
 
-export async function buildWorld(sc, { run, model }) {
+// A wrong answer to a scenario where the weather is mild can only be tried if the traveler signed a limit the mild forecast
+// reaches; otherwise code refuses it before it touches the plan. For the scoring check, such a traveler is signed in.
+export function negativeWeather(sc) {
+  const rain = Object.values(sc.forecasts).filter((f) => f.available).map((f) => f.rainChancePct);
+  return sc.trigger.wake && rain.length && Math.max(...rain) < DEFAULT_WEATHER.rainPct ? { rainPct: Math.max(1, Math.max(...rain)), windKph: DEFAULT_WEATHER.windKph } : DEFAULT_WEATHER;
+}
+
+export async function buildWorld(sc, { run, model, weather = DEFAULT_WEATHER }) {
   const clock = { t: NOW };
   const fake = fakePayPalFetch({ now: () => clock.t });
   const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
@@ -28,7 +36,7 @@ export async function buildWorld(sc, { run, model }) {
   const trip = w.env.TRIP.get(id);
   must(await trip.call('createTrip', [id, { prompt: sc.prompt, startDate: START, ownerTokenHash: await sha256Hex(token) }]));
   const call = (m, a = []) => trip.call(m, a, token);
-  must(await call('setMandateTerms', [{ enabled: true, refundCapCents: sc.terms.refund * 100, planIncreaseCapCents: sc.terms.raise * 100, validUntil: Date.parse('2026-05-10T00:00:00Z') }]));
+  must(await call('setMandateTerms', [{ enabled: true, refundCapCents: sc.terms.refund * 100, planIncreaseCapCents: sc.terms.raise * 100, weather, validUntil: Date.parse('2026-05-10T00:00:00Z') }]));
   const p = must(await call('view')).v.proposal;
   must(await call('confirm', [p.id, p.digest]));
   const o = must(await call('createOrder', [p.id]));
@@ -36,7 +44,7 @@ export async function buildWorld(sc, { run, model }) {
   for (const d of sc.docs) must(await call('addDocument', [d]));
   const state = () => w.storageOf(id).mem.get('state');
   const idOf = (re) => state().plan.items.find((i) => re.test(i.title))?.id;
-  return { w, id, token, call, fake, clock, state, obj: w.objects.get(id), ids: { apartment: idOf(/Alfama|Ryokan/), boat: idOf(/boat|bamboo/i), sintra: idOf(/Sintra|Bullet/), fado: idOf(/Fado|Tea/) }, stop: w.stop };
+  return { w, id, token, call, fake, clock, state, weather, obj: w.objects.get(id), ids: { apartment: idOf(/Alfama|Ryokan/), boat: idOf(/boat|bamboo/i), sintra: idOf(/Sintra|Bullet/), fado: idOf(/Fado|Tea/) }, stop: w.stop };
 }
 
 // ---- approaches -----------------------------------------------------------------------------------------------------
@@ -65,18 +73,26 @@ Rules:
 3. Acting is the default: the traveler signed limits so that you can handle changes yourself. But only change what is really threatened: storms, heavy rain, strong wind, a closure or something the traveler asked for. Light rain or a low chance of rain is not a reason to change a booking. When a safe option exists (inside your limits, losing the traveler nothing), submit it; do not ask the traveler to approve what you may do yourself, and when several places would do equally well, pick one. When more than one option makes sense, choose the one that loses the traveler the least money, moves the least money at PayPal, stays inside the budget and keeps what the traveler still wants.
 4. A new place must come from the places list: use its placeId. Ticket prices are not given: price a replacement at the item it replaces (amountBasis same_as_replaced, with replaces), or at a price the traveler wrote (user_given).
 5. If the option you want is outside your limits, submit it anyway: code turns it into a proposal the traveler confirms with one click, so never ask in words for permission. Use ask_traveler only when nothing safe exists or the choice is a matter of the traveler's taste, never to confirm a safe fix and never to ask for something you can look up. Nothing has changed until you answer, so never tell the traveler you already changed something. Use no_change when the facts show the plan is fine, when the traveler only asks a question, or when the traveler tells you to keep things as they are. Code decides whether your choice runs now or waits for the traveler. You cannot change their limits or their budget.
+6. Every submit_edit carries its authority, the reason you may act at all, and code checks it. When the traveler wrote to you, quote the part of their message that asks for the change, letter for letter (source traveler); a question or an opinion about the weather is not a request, so answer it with no_change. When the schedule woke you there are no words of the traveler's to quote: you may act only if the forecast of a trip day below reaches the rain or wind limit the traveler signed (limits.weather in the trip; source threshold, with the metric and the trip day), and otherwise you answer no_change.
 Be brief. All prices are US dollars for the whole group.`;
+
+// The context the one-call approach and the reference answer work in: the same guards as the agent's, except that neither can
+// weigh a second plan on its own, so the comparison the agent owes before money moves at PayPal is not asked of them.
+function sideContext(wd, sc, facade, runId) {
+  return {
+    runId, now: () => wd.clock.t, sources: fakeSources({ forecasts: sc.forecasts, places: sc.places }), seenPlaces: new Map(), simulated: new Map(), forecasts: new Map(), simulatedForecast: null,
+    trigger: sc.trigger.message ? 'message' : 'wake', minOptions: 1,
+    travelerText: sc.trigger.message ?? '', // the traveler's own words, as in the product; pasted documents are not their words
+    readState: () => facade.state(), simulate: (ops) => facade.simulate(ops),
+    recordPolicy: (raw) => facade.mutate('recordPolicy', [raw]), submitEdit: (payload) => facade.mutate('submitEdit', [payload]),
+  };
+}
 
 export async function runBaseline(sc, wd, { run, model }) {
   const tools = createTools();
   const facade = wd.obj.runner.facade;
   const s0 = await facade.state();
-  const ctx = {
-    runId: 'baseline', now: () => wd.clock.t, sources: fakeSources({ forecasts: sc.forecasts, places: sc.places }), seenPlaces: new Map(), simulated: new Map(), simulatedForecast: null,
-    travelerText: sc.trigger.message ?? '', // the traveler's own words, as in the product; pasted documents are not their words
-    readState: () => facade.state(), simulate: (ops) => facade.simulate(ops),
-    recordPolicy: (raw) => facade.mutate('recordPolicy', [raw]), submitEdit: (payload) => facade.mutate('submitEdit', [payload]),
-  };
+  const ctx = sideContext(wd, sc, facade, 'baseline');
   const use = async (name, args) => runTool(tools, { name }, { ok: true, value: args }, ctx);
   // the facts, fetched the way the tools fetch them, for every trip day and every kind of place
   const trip = (await use('get_trip', {})).result;
@@ -100,7 +116,7 @@ ${s0.documents.length ? s0.documents.map((d) => `[${d.id}] ${d.text}`).join('\n'
   // the one tool call carries what the agent's tools carry separately: the edit, and the terms it read (record_policy's fields)
   const submitDef = tools.find((t) => t.name === 'submit_edit');
   const policyDef = tools.find((t) => t.name === 'record_policy');
-  const oneCall = { ...submitDef, description: "Hand over your final choice. Code decides what happens: inside the traveler's limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task. Fill remove, reprice, update, add or setTravelers, plus summary, reason and terms.", parameters: { ...submitDef.parameters, properties: { ...submitDef.parameters.properties, terms: { type: 'array', maxItems: 8, items: policyDef.parameters, description: 'What the pasted booking terms say about each item you cancel or lower.' } } } };
+  const oneCall = { ...submitDef, description: "Hand over your final choice. It must carry its basis in authority. Code decides what happens: inside the traveler's limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task. Fill remove, reprice, update, add or setTravelers, plus summary, reason, authority and terms.", parameters: { ...submitDef.parameters, properties: { ...submitDef.parameters.properties, terms: { type: 'array', maxItems: 8, items: policyDef.parameters, description: 'What the pasted booking terms say about each item you cancel or lower.' } } } };
   const defs = toolDefs([oneCall, ...tools.filter((t) => ['ask_traveler', 'no_change'].includes(t.name))]);
   const res = await callModel({ run, model, messages: [{ role: 'system', content: BASELINE_SYSTEM }, { role: 'user', content: user }], tools: defs, timeoutMs: 90_000 });
   const stats = { modelCalls: 1, neurons: Math.round(neuronsOf(model, res.usage) * 10) / 10, ms: res.ms, model };
@@ -115,12 +131,12 @@ ${s0.documents.length ? s0.documents.map((d) => `[${d.id}] ${d.text}`).join('\n'
   const bad = validate(oneCall.parameters, parsed.value);
   if (bad.length) return { final: { kind: 'stopped', why: `arguments do not fit: ${bad.join('; ')}` }, trace: [], stats };
   // the terms it read go through the same record_policy checks as the agent's (a rejected one is simply not recorded)
-  const { terms = [], summary, reason, ...edit } = parsed.value;
+  const { terms = [], summary, reason, authority, ...edit } = parsed.value;
   for (const t of terms) await use('record_policy', t);
   // the harness, not the model, tries the choice in the simulator so that it can be submitted at all
   const sim = await use('simulate_edit', edit);
   if (sim.result?.ok === false) return { final: { kind: 'stopped', why: `guard: ${sim.result.error}` }, trace: [], stats };
-  const out = await runTool(tools, { name: 'submit_edit' }, { ok: true, value: { ...edit, summary, reason } }, ctx);
+  const out = await runTool(tools, { name: 'submit_edit' }, { ok: true, value: { ...edit, summary, reason, authority } }, ctx);
   return { final: out.final ?? { kind: 'stopped', why: `guard: ${out.result?.error ?? 'refused'}` }, trace: [], stats };
 }
 
@@ -129,22 +145,31 @@ export async function runOracle(sc, wd, which = 'oracle') {
   const tools = createTools();
   const facade = wd.obj.runner.facade;
   const s0 = await facade.state();
-  const ctx = {
-    runId: 'oracle', now: () => wd.clock.t, sources: fakeSources({ forecasts: sc.forecasts, places: sc.places }), seenPlaces: new Map(), simulated: new Map(), simulatedForecast: null,
-    travelerText: sc.trigger.message ?? '', // the traveler's own words, as in the product; pasted documents are not their words
-    readState: () => facade.state(), simulate: (ops) => facade.simulate(ops),
-    recordPolicy: (raw) => facade.mutate('recordPolicy', [raw]), submitEdit: (payload) => facade.mutate('submitEdit', [payload]),
-  };
+  const ctx = sideContext(wd, sc, facade, 'oracle');
   const use = (name, args) => runTool(tools, { name }, { ok: true, value: args }, ctx);
   const a = sc[which](wd.ids);
   if (a.ask) return { final: (await use('ask_traveler', { question: a.ask })).final, trace: [], stats: { modelCalls: 0 } };
   if (a.noChange) return { final: (await use('no_change', { note: a.noChange })).final, trace: [], stats: { modelCalls: 0 } };
   for (const kind of ['museum', 'aquarium', 'park', 'castle']) await use('search_places', { kind });
   for (const t of oracleTerms(sc, s0)) { const r = await use('record_policy', t); if (r.result.recorded === false) throw new Error(`oracle ${sc.id} cannot record ${t.itemId}: ${r.result.error}`); }
+  const authority = await oracleAuthority(sc, s0, use, wd.weather);
   const sim = await use('simulate_edit', a.submit);
   if (sim.result.ok === false) throw new Error(`oracle ${sc.id} cannot be simulated: ${sim.result.error}`);
-  const out = await use('submit_edit', { ...a.submit, summary: 'Reference answer.', reason: 'Reference answer.' });
+  const out = await use('submit_edit', { ...a.submit, summary: 'Reference answer.', reason: 'Reference answer.', authority });
   return { final: out.final ?? { kind: 'stopped', why: JSON.stringify(out.result) }, trace: [], stats: { modelCalls: 0 } };
+}
+
+// The basis a careful agent would give for a move in this scenario: the traveler's message when they wrote one, and otherwise the
+// first forecast day (fetched, as the agent must) that reaches a weather limit signed with the other limits.
+async function oracleAuthority(sc, s0, use, limits) {
+  if (sc.trigger.message) return { source: 'traveler', quote: sc.trigger.message.slice(0, 300) };
+  const days = [...new Set(s0.plan.items.map((i) => i.day))].sort((x, y) => x - y);
+  for (const day of days) {
+    const f = (await use('get_forecast', { day })).result;
+    if (f.available && f.rainChancePct >= limits.rainPct) return { source: 'threshold', metric: 'rainPct', day };
+    if (f.available && f.windKph >= limits.windKph) return { source: 'threshold', metric: 'windKph', day };
+  }
+  throw new Error(`oracle ${sc.id} wakes on a forecast that reaches no weather limit but changes the plan`);
 }
 
 // What a careful reader would record from the pasted terms, built from the scenario's ground truth and the document's own line.

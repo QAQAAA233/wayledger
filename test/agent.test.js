@@ -1,47 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPayPal } from '../src/paypal.js';
-import { sha256Hex } from '../src/domain/hash.js';
 import { itemState } from '../src/domain/ledger.js';
 import { createSources, summarizePayPal } from '../src/agent/sources.js';
-import { fakePayPalFetch, fakeEnv, fakeSources, scriptedModel, lastToolResult, planner, untilRunDone, PLAN_PROMPT, SAMPLE_PLAN } from './helpers.js';
+import { fakeSources, scriptedModel, lastToolResult, SAMPLE_PLAN } from './helpers.js';
 import { BudgetExhausted } from '../src/agent/loop.js';
-import { TERMS, BOAT_QUOTE, SINTRA_QUOTE, PLAN, PLACES, STORM, T, allResults, facts, found, boatOf, stormSteps } from './storm.js';
+import { world, startRun, moneyCalls, titles, TERMS_OK } from './agent-world.js';
+import { BOAT_QUOTE, SINTRA_QUOTE, PLACES, STORM, T, allResults, facts, found, boatOf, stormSteps, REQUEST_QUOTE, BY_TRAVELER } from './storm.js';
 
 // The agent, end to end, with a scripted stand-in for the model. The real engine, ledger, tools, guards, runner and
 // alarm are all real; only the model, PayPal's HTTP and the forecast/place services are replaced at the edge.
-const CLOCK0 = Date.parse('2026-05-01T09:00:00Z');
-
-async function world({ run, sources = fakeSources({ forecasts: STORM, places: PLACES }), terms, checkout = true, vars = {}, spend, plan = PLAN, docs = true, models } = {}) {
-  const clock = { t: CLOCK0 };
-  const fake = fakePayPalFetch({ now: () => clock.t });
-  const paypal = createPayPal({ clientId: 'id', secret: 's', fetchImpl: fake.fetchImpl });
-  const w = fakeEnv({ paypal, run, sources, ai: planner(plan), now: () => clock.t, vars, spend, models });
-  const id = 'ab'.repeat(12);
-  const token = 'owner-secret';
-  const trip = w.env.TRIP.get(id);
-  const created = await trip.call('createTrip', [id, { prompt: PLAN_PROMPT, startDate: '2026-05-04', ownerTokenHash: await sha256Hex(token) }]);
-  assert.ok(created.ok, JSON.stringify(created));
-  const call = (m, a = []) => trip.call(m, a, token);
-  if (terms) assert.ok((await call('setMandateTerms', [terms])).ok);
-  if (checkout) {
-    const p = (await call('view')).v.proposal;
-    assert.ok((await call('confirm', [p.id, p.digest])).ok);
-    const o = await call('createOrder', [p.id]);
-    assert.ok((await call('approveOrder', [p.id, o.v.orderId])).ok);
-  }
-  if (docs) assert.ok((await call('addDocument', [TERMS])).ok);
-  return { w, trip, call, clock, fake, id, token, view: async () => (await call('view')).v, state: () => w.storageOf(id).mem.get('state') };
-}
-const startRun = async (wd, text = 'A storm is forecast for the boat tour day. Swap it for something indoors.') => {
-  const r = await wd.call('startRun', [text]);
-  assert.ok(r.ok, JSON.stringify(r));
-  return untilRunDone(wd.w.env, wd.id, r.v.runId, { token: wd.token });
-};
-const moneyCalls = (wd) => wd.fake.calls.filter((c) => /POST .*\/(orders|authorize|capture|void|refund)/.test(c));
-const titles = (run) => run.events.filter((e) => e.title).map((e) => e.title);
-// the buffer in the hold is as big as the raise allowed: $180, enough to set aside the replacement for the $180 boat tour
-const TERMS_OK = { enabled: true, refundCapCents: 21000, planIncreaseCapCents: 18000, validUntil: Date.parse('2026-05-10T00:00:00Z') };
 
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -75,7 +42,7 @@ test('woken by a storm, the agent reads the terms, finds a real museum, compares
   // what the person sees while it works: what was asked, what came back, what was chosen, whether it was allowed, PayPal's check
   assert.deepEqual(titles(run).filter((t) => !/^Tried option/.test(t)), [
     'Read your message', 'Looked at your trip', 'Checked the forecast', 'Read your booking terms', 'Noted a rule for Sunset boat tour',
-    'Searched for museum places', 'Chose an option', 'Inside your limits, so it went ahead', 'Checked PayPal against the ledger',
+    'Searched for museum places', 'Compared 2 options', 'Chose an option', 'Inside your limits, so it went ahead', 'Checked PayPal against the ledger',
   ]);
   const rule = run.events.find((e) => e.title?.startsWith('Noted a rule'));
   assert.equal(rule.quote, BOAT_QUOTE, 'the sentence it relied on is on the screen');
@@ -83,7 +50,7 @@ test('woken by a storm, the agent reads the terms, finds a real museum, compares
   assert.match(trial.detail, /Inside your limits/);
   assert.match(trial.detail, /Lost to the operator: \$0\.00/);
   assert.equal(run.events.at(-1).ok, true);
-  assert.ok(run.stats.modelCalls >= 7);
+  assert.ok(run.stats.modelCalls >= 8);
 });
 
 test('the same request outside the limits: the agent stops, nothing moves, and the change waits as a proposal the person can confirm', async () => {
@@ -110,10 +77,13 @@ test('the same request outside the limits: the agent stops, nothing moves, and t
 });
 
 test('a choice that needs a new PayPal hold is never the agent\'s to make, even with room in the limits', async () => {
+  const one = (name, amount, day = 3) => ({ add: [{ day, title: name, category: 'activity', amount, amountBasis: 'user_given' }] });
+  // a new hold is money at PayPal, so the plan is weighed against another one first
   const add = (name, amount) => [
     { calls: [T('get_trip')] },
-    { calls: [T('simulate_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given' }] })] },
-    { calls: [T('submit_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given' }], summary: 'Added it.', reason: 'You asked.' })] },
+    { calls: [T('simulate_edit', one(name, amount))] },
+    { calls: [T('simulate_edit', one(name, amount, 2))] },
+    { calls: [T('submit_edit', { ...one(name, amount), summary: 'Added it.', reason: 'You asked.', authority: { source: 'traveler', quote: 'add a Helicopter tour on day 3 for $300' } })] },
   ];
   const wd = await world({ run: scriptedModel(add('Helicopter tour', 300)), terms: TERMS_OK });
   const run = await startRun(wd, 'Please add a Helicopter tour on day 3 for $300.');
@@ -125,7 +95,7 @@ test('a choice that needs a new PayPal hold is never the agent\'s to make, even 
 
 test('inside the buffer an added item needs no PayPal call at all: the money was already held', async () => {
   const edit = { add: [{ day: 3, title: 'Sintra lunch', category: 'food', amount: 100, amountBasis: 'user_given' }] };
-  const wd = await world({ run: scriptedModel([{ calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Lunch added.', reason: 'You asked.' })] }]), terms: TERMS_OK });
+  const wd = await world({ run: scriptedModel([{ calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Lunch added.', reason: 'You asked.', authority: { source: 'traveler', quote: 'Add Sintra lunch for $100' } })] }]), terms: TERMS_OK });
   const before = moneyCalls(wd).length;
   const run = await startRun(wd, 'Add Sintra lunch for $100.');
   assert.equal(run.final.outcome, 'executed');
@@ -168,8 +138,8 @@ test('hard condition 2: one model call cannot do it; each step depends on the to
   const model = scriptedModel(stormSteps());
   const wd = await world({ run: model, terms: TERMS_OK });
   const run = await startRun(wd);
-  assert.equal(model.log.length, 7, 'seven model calls for one decision');
-  assert.equal(run.stats.modelCalls, 7);
+  assert.equal(model.log.length, 8, 'eight model calls for one decision');
+  assert.equal(run.stats.modelCalls, 8);
 
   // every later request carries the earlier tool results: the conversation really is a chain
   for (let i = 1; i < model.log.length; i++) {
@@ -178,12 +148,12 @@ test('hard condition 2: one model call cannot do it; each step depends on the to
     assert.equal(now, before + 1, `request ${i + 1} contains the result of request ${i}`);
   }
   // and what it finally submitted came out of those results, not out of the first question
-  const sent = JSON.parse(model.log.at(-1).messages.findLast((m) => m.role === 'assistant' && m.tool_calls.some((c) => c.function.name === 'simulate_edit')).tool_calls[0].function.arguments);
-  assert.deepEqual(sent.add[0].placeId, 'wd:Q1262183');
-  assert.deepEqual(run.events.filter((e) => e.kind === 'model').map((e) => e.turn), [1, 2, 3, 4, 5, 6, 7]);
+  const swapped = JSON.parse(model.log.at(-1).messages.find((m) => m.role === 'assistant' && m.tool_calls.some((c) => c.function.name === 'simulate_edit')).tool_calls[0].function.arguments);
+  assert.deepEqual(swapped.add[0].placeId, 'wd:Q1262183');
+  assert.deepEqual(run.events.filter((e) => e.kind === 'model').map((e) => e.turn), [1, 2, 3, 4, 5, 6, 7, 8]);
 
   // a model that answers in one go is refused: an edit that was not simulated first is not accepted
-  const oneShot = scriptedModel([{ calls: [T('submit_edit', { reprice: [{ itemId: 'i1', amount: 100 }], summary: 'Done.', reason: 'Because.' })] }]);
+  const oneShot = scriptedModel([{ calls: [T('submit_edit', { reprice: [{ itemId: 'i1', amount: 100 }], summary: 'Done.', reason: 'Because.', authority: BY_TRAVELER })] }]);
   const wd2 = await world({ run: oneShot, terms: TERMS_OK });
   const run2 = await startRun(wd2);
   assert.equal(run2.final.kind, 'stopped');
@@ -300,7 +270,8 @@ test('a model that never reads the pasted terms cannot cancel anything: the code
   const lazy = scriptedModel([
     { calls: [T('get_trip')] },
     ({ messages }) => ({ calls: [T('simulate_edit', { remove: [boatOf(messages).id] })] }),
-    ({ messages }) => ({ calls: [T('submit_edit', { remove: [boatOf(messages).id], summary: 'Removed it.', reason: 'Storm.' })] }),
+    ({ messages }) => ({ calls: [T('simulate_edit', { remove: [facts(messages).items.find((i) => /Sintra/.test(i.title)).id] })] }),
+    ({ messages }) => ({ calls: [T('submit_edit', { remove: [boatOf(messages).id], summary: 'Removed it.', reason: 'Storm.', authority: BY_TRAVELER })] }),
   ]);
   const wd = await world({ run: lazy, terms: TERMS_OK });
   const before = moneyCalls(wd).length;
@@ -333,10 +304,11 @@ test('a price the traveler never wrote cannot be put on an existing item: models
 
 test('a submit that differs from what was simulated is refused with the simulated edit shown; an update that changes nothing is ignored', async () => {
   const edit = { reprice: [{ itemId: 'i3', amount: 200 }] };
+  const OPERATOR_PRICE = { source: 'traveler', quote: 'The Sintra day trip operator now wants $200' };
   const m = scriptedModel([
     { calls: [T('simulate_edit', edit)] },
-    { calls: [T('submit_edit', { reprice: [{ itemId: 'i3', amount: 200 }, { itemId: 'i1', amount: 200 }], summary: 'Raised it.', reason: 'The operator asked.' })] },
-    { calls: [T('submit_edit', { ...edit, update: [{ itemId: 'i3' }], summary: 'Raised it.', reason: 'The operator asked.' })] },
+    { calls: [T('submit_edit', { reprice: [{ itemId: 'i3', amount: 200 }, { itemId: 'i1', amount: 200 }], summary: 'Raised it.', reason: 'The operator asked.', authority: OPERATOR_PRICE })] },
+    { calls: [T('submit_edit', { ...edit, update: [{ itemId: 'i3' }], summary: 'Raised it.', reason: 'The operator asked.', authority: OPERATOR_PRICE })] },
   ]);
   const wd = await world({ run: m, terms: TERMS_OK });
   const run = await startRun(wd, 'The Sintra day trip operator now wants $200 for it.');

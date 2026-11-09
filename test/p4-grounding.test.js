@@ -98,7 +98,7 @@ test('finding 2: who shares an item cannot be changed for someone the traveler d
 
 test('finding 2: a person the traveler did name can be moved, and the change still waits for the traveler\'s OK', async () => {
   const edit = { update: [{ itemId: 'i3', participants: ['Ana'] }] };
-  const m = scriptedModel([{ calls: [T('get_trip')] }, { calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Ben is off the Sintra trip.', reason: 'You said so.' })] }]);
+  const m = scriptedModel([{ calls: [T('get_trip')] }, { calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Ben is off the Sintra trip.', reason: 'You said so.', authority: { source: 'traveler', quote: 'Ben does not want to go on the Sintra day trip' } })] }]);
   const wd = await world({ run: m });
   const run = await go(wd, 'Ben does not want to go on the Sintra day trip.');
   assert.equal(run.final.outcome, 'proposed');
@@ -115,7 +115,8 @@ test('finding 2: a replacement is shared like the item it replaces, so swapping 
     { calls: [T('get_trip')] },
     { calls: [T('search_places', { kind: 'museum' })] },
     ({ messages }) => ({ calls: [T('simulate_edit', swap(messages))] }),
-    ({ messages }) => ({ calls: [T('submit_edit', { ...swap(messages), summary: 'Swapped Sintra for a museum.', reason: 'Storm.' })] }),
+    { calls: [T('simulate_edit', { remove: ['i3'] })] },
+    ({ messages }) => ({ calls: [T('submit_edit', { ...swap(messages), summary: 'Swapped Sintra for a museum.', reason: 'Storm.', authority: { source: 'traveler', quote: 'Swap it for a museum' } })] }),
   ]);
   const wd = await world({ run: m });
   const run = await go(wd, 'It will storm on the Sintra day. Swap it for a museum.');

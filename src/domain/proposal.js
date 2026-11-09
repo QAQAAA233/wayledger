@@ -19,12 +19,13 @@ const canonical = (p) => JSON.stringify({
   ...(p.mandateTerms ? { mandateTerms: p.mandateTerms } : {}),
   ...(p.humanOnly ? { humanOnly: p.humanOnly } : {}),
   ...(p.operatorLoss ? { operatorLoss: p.operatorLoss } : {}),
+  ...(p.authority ? { authority: p.authority } : {}),
   ...(p.settleOnDay ? { settleOnDay: true } : {}),
 });
 
 // `summary` is written by code from the actions. `agentNote` is what the model said; it is shown apart, labelled,
 // and is not part of what anyone confirms.
-export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, agentNote, source, settleOnDay, now, ttlMs = PROPOSAL_TTL_MS }) {
+export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, authority, agentNote, source, settleOnDay, now, ttlMs = PROPOSAL_TTL_MS }) {
   // A change of the plan that moves no money is still a proposal: a person confirms it, or the signed limits do.
   if (actions.length === 0 && !newPlan && kind !== 'close') throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
   const proposal = {
@@ -35,6 +36,7 @@ export async function createProposal({ id, tripId, kind, summary, actions, newPl
     ...(mandateTerms ? { mandateTerms } : {}),
     ...(humanOnly ? { humanOnly } : {}),
     ...(operatorLoss ? { operatorLoss } : {}),
+    ...(authority ? { authority } : {}),
     ...(settleOnDay ? { settleOnDay: true } : {}),
     ...(agentNote ? { agentNote } : {}),
     ...(source ? { source } : {}),

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SCENARIOS } from './scenarios.mjs';
 import { makeRest, Spend, NEURON_USD } from './rest.mjs';
-import { buildWorld, runAgent, runBaseline, runOracle, measure } from './world.mjs';
+import { buildWorld, runAgent, runBaseline, runOracle, measure, negativeWeather } from './world.mjs';
 import { MODELS } from '../src/agent/model.js';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
@@ -53,7 +53,7 @@ async function one(j) {
   const rec = { scenario: j.sc.id, name: j.sc.name, split: j.sc.split, approach: j.approach, model: ['oracle', 'negative'].includes(j.approach) ? null : j.model, rep: j.rep, tag, startedAt: new Date().toISOString() };
   let wd;
   try {
-    wd = await buildWorld(j.sc, { run, model: j.model });
+    wd = await buildWorld(j.sc, { run, model: j.model, ...(j.approach === 'negative' ? { weather: negativeWeather(j.sc) } : {}) });
     const before = structuredClone(wd.state().plan);
     const ledgerBefore = wd.state().ledger.length;
     const out = j.approach === 'agent' ? await runAgent(j.sc, wd) : j.approach === 'baseline' ? await runBaseline(j.sc, wd, { run, model: j.model }) : await runOracle(j.sc, wd, j.approach);

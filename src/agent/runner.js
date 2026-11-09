@@ -3,6 +3,7 @@ import { createTools } from './tools.js';
 import { AGENT_SYSTEM, userMessageFor } from './prompts.js';
 import { dayDate, lastDay } from '../domain/plan.js';
 import { itemState, reserves } from '../domain/ledger.js';
+import { DEFAULT_WEATHER } from '../domain/mandate.js';
 import { UserFacingError } from '../engine.js';
 
 // Runs the agent for one trip. A run is a record in the trip's storage whose trace grows event by event, so the screen
@@ -14,9 +15,9 @@ const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 10);
 
 const summaryOf = (run) => ({ id: run.id, trigger: run.trigger, status: run.status, startedAt: run.startedAt ?? run.createdAt, finishedAt: run.finishedAt ?? null, outcome: run.final ? `${run.final.kind}${run.final.outcome ? `:${run.final.outcome}` : ''}` : null, simulated: Boolean(run.simulated) });
 
-// A forecast day counts as notable when it is stormy, very wet or very windy; used to decide whether a scheduled
-// check is worth waking the model for. The model, not this code, decides what to do about it.
-const notable = (f) => Boolean(f?.available) && (f.rainChancePct >= 70 || [95, 96, 99].includes(f.weatherCode) || f.windKph >= 50);
+// A forecast day counts as notable when it is stormy, or reaches the rain or wind limit the traveler signed; used to decide
+// whether a scheduled check is worth waking the model for. The model, not this code, decides what to do about it.
+const notable = (f, w) => Boolean(f?.available) && (f.rainChancePct >= w.rainPct || [95, 96, 99].includes(f.weatherCode) || f.windKph >= w.windKph);
 const bucket = (f) => (!f?.available ? 'none' : `${f.rainChancePct >= 70 ? 'wet' : f.rainChancePct >= 40 ? 'damp' : 'dry'}${[95, 96, 99].includes(f.weatherCode) ? '+thunder' : ''}${f.windKph >= 50 ? '+wind' : ''}`);
 const line = (date, f) => `${date}: ${f.summary}, ${f.rainChancePct}% chance of rain, wind up to ${f.windKph} km/h`;
 
@@ -68,7 +69,10 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
       const s = await trip.state();
       const tools = createTools();
       const ctx = {
-        runId: r.id, now, sources, seenPlaces: new Map(), simulated: new Map(), simulatedForecast: r.simulatedForecast,
+        runId: r.id, now, sources, seenPlaces: new Map(), simulated: new Map(), forecasts: new Map(), simulatedForecast: r.simulatedForecast,
+        trigger: r.trigger,
+        // money at PayPal moves only after this many different plans were weighed
+        minOptions: 2,
         // what the traveler wrote in this run: the only words a name, a price or a share may be taken from
         travelerText: r.text,
         readState: () => trip.state(),
@@ -129,7 +133,7 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
     for (const [, date] of dates) snap[date] = await sources.forecast({ destination: s.plan.destination, date });
     const last = await storage.get('lastForecast');
     await storage.put('lastForecast', Object.fromEntries(Object.entries(snap).map(([d, f]) => [d, { available: f.available, rainChancePct: f.rainChancePct, windKph: f.windKph, weatherCode: f.weatherCode, summary: f.summary }])));
-    const changed = Object.entries(snap).filter(([d, f]) => (last ? bucket(f) !== bucket(last[d]) : notable(f)));
+    const changed = Object.entries(snap).filter(([d, f]) => (last ? bucket(f) !== bucket(last[d]) : notable(f, s.mandate?.terms?.weather ?? DEFAULT_WEATHER)));
     if (changed.length === 0) {
       const have = Object.values(snap).filter((f) => f.available).length;
       const r = { id: uid(), tripId: s.id, trigger: 'wake', text: '', diff: '', status: 'done', createdAt: now(), startedAt: now(), finishedAt: now(), heartbeatAt: now(), final: { kind: 'no_change', note: `Checked the forecast for ${have} of ${dates.length} trip day(s). Nothing changed that matters.` }, events: [] };

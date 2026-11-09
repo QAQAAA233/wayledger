@@ -10,6 +10,10 @@ import { chargesNow } from './delta.js';
 //   validUntil           epoch ms; after that every change waits for the person
 export const MANDATE_ACTIONS = ['release', 'allocate', 'refund'];
 
+// The weather the traveler signs as a reason for the agent to act on a wake-up: a forecast at or above either number backs a
+// change. Without a forecast that crosses one, the agent has no basis of its own and can only report.
+export const DEFAULT_WEATHER = { rainPct: 70, windKph: 50 };
+
 const dollars = (c) => `$${(c / 100).toFixed(2)}`;
 
 // The room the agent has for raising the plan is held as a buffer, so it can never be more than the budget leaves above the plan.
@@ -21,8 +25,18 @@ export function defaultTerms({ planTotalCents, validUntil, budgetCents = null })
     enabled: true,
     refundCapCents: whole(planTotalCents * 0.25),
     planIncreaseCapCents: Math.min(whole(planTotalCents * 0.25), raiseRoomCents(planTotalCents, budgetCents)),
+    weather: { ...DEFAULT_WEATHER },
     validUntil,
   };
+}
+
+function normalizeWeather(w) {
+  const whole = (v, max, what) => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > max) throw new Error(`The ${what} limit must be a whole number from 1 to ${max}.`);
+    return n;
+  };
+  return { rainPct: whole(w.rainPct, 100, 'chance-of-rain (%)'), windKph: whole(w.windKph, 200, 'wind (km/h)') };
 }
 
 export function normalizeTerms(raw, { maxValidUntil } = {}) {
@@ -31,13 +45,14 @@ export function normalizeTerms(raw, { maxValidUntil } = {}) {
     if (!Number.isFinite(n) || n < 0) throw new Error('Limits must be amounts of $0 or more.');
     return n;
   };
-  if (raw.enabled === false) return { enabled: false, refundCapCents: 0, planIncreaseCapCents: 0, validUntil: 0 };
+  if (raw.enabled === false) return { enabled: false, refundCapCents: 0, planIncreaseCapCents: 0, weather: null, validUntil: 0 };
   const validUntil = Math.round(Number(raw.validUntil));
   if (!Number.isFinite(validUntil) || validUntil <= 0) throw new Error('Choose how long the limits last.');
   return {
     enabled: true,
     refundCapCents: Math.min(num(raw.refundCapCents), 500000),
     planIncreaseCapCents: Math.min(num(raw.planIncreaseCapCents), 500000),
+    weather: raw.weather === undefined ? { ...DEFAULT_WEATHER } : normalizeWeather(raw.weather),
     validUntil: maxValidUntil ? Math.min(validUntil, maxValidUntil) : validUntil,
   };
 }
@@ -95,5 +110,6 @@ export function evaluateMandate(mandate, { actions, humanOnly = false, planAfter
 
 export function describeTerms(terms) {
   if (!terms?.enabled) return 'The agent may not act on its own. Every change waits for your OK.';
-  return `The agent may cancel or refund up to ${dollars(terms.refundCapCents)} in total and raise the plan by up to ${dollars(terms.planIncreaseCapCents)}, until ${new Date(terms.validUntil).toISOString().slice(0, 10)}. Anything beyond that waits for you.`;
+  const weather = terms.weather ? ` On its own check it acts on the weather only when the forecast reaches ${terms.weather.rainPct}% chance of rain or wind of ${terms.weather.windKph} km/h.` : '';
+  return `The agent may cancel or refund up to ${dollars(terms.refundCapCents)} in total and raise the plan by up to ${dollars(terms.planIncreaseCapCents)}, until ${new Date(terms.validUntil).toISOString().slice(0, 10)}.${weather} Anything beyond that waits for you.`;
 }

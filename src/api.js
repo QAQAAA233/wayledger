@@ -102,6 +102,8 @@ export async function handleRequest(request, env, deps = {}) {
         enabled: true,
         refundCapCents: dollarsToCents(body.refundCap),
         planIncreaseCapCents: dollarsToCents(body.planIncreaseCap),
+        // a request that names no weather limits gets the defaults
+        weather: body.rainPct === undefined && body.windKph === undefined ? undefined : { rainPct: Number(body.rainPct), windKph: Number(body.windKph) },
         validUntil: Date.parse(`${String(body.validUntil)}T23:59:59Z`),
       };
       return unwrap(await trip.call('setMandateTerms', [terms], token));

@@ -1,0 +1,27 @@
+{
+ "tag": "oracle4",
+ "startedAt": "2026-11-09T19:00:49.582Z",
+ "commit": "e4f22e1",
+ "uncommittedChangesInSrcOrEval": true,
+ "approaches": [
+  "oracle"
+ ],
+ "models": [
+  "gemma"
+ ],
+ "reps": 1,
+ "split": "all",
+ "fileHashes": {
+  "src/agent/prompts.js": "6b8c2977c299f5a4",
+  "src/agent/tools.js": "7b7c0afd84444522",
+  "src/agent/loop.js": "808e7dd815e556cf",
+  "src/agent/schema.js": "02eb5719743bef51",
+  "src/agent/model.js": "5cc19c8791354b6d",
+  "src/domain/policy.js": "a48af75f8ef316e2",
+  "src/domain/mandate.js": "734b0115b95a00ca",
+  "src/domain/delta.js": "e9c5fb135aef6709",
+  "src/engine.js": "520a7e3d222ee490",
+  "eval/world.mjs": "bed2d16e6f1536bf",
+  "eval/scenarios.mjs": "78506c5c838b2642"
+ }
+}

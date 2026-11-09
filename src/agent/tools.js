@@ -1,7 +1,9 @@
 import { CATEGORIES, dayDate, tripEndDate } from '../domain/plan.js';
 import { itemState, reserves } from '../domain/ledger.js';
 import { describeEdit, describeEffect, paypalEffect } from '../domain/describe.js';
+import { itemDueOn } from '../domain/delta.js';
 import { textHasName, namesPerson, moneyIn } from '../domain/facts.js';
+import { verifyAuthority, describeAuthority } from '../domain/authority.js';
 import { validate } from './schema.js';
 
 // The agent's hands and eyes. Perception tools report facts and where they came from. simulate_edit reports the
@@ -132,6 +134,26 @@ function optionText(sim, ops, s) {
   return lines.length ? lines.join('; ') : `${ops.length} change(s)`;
 }
 
+// Two options are different when the plans they lead to differ, however the edits were written.
+const planKey = (plan) => JSON.stringify([plan.items, plan.travelers, plan.budgetCents]);
+const MIN_OPTIONS_MESSAGE = (n, need) => `Before money moves at PayPal, weigh at least ${need} different plans with simulate_edit (one for each real way to handle this) and submit the best. You have simulated ${n}. Simulate another way to handle it, then submit.`;
+
+// What the screen shows as the comparison: every distinct option the agent tried, with its money, and the one it chose.
+function comparison(ctx, chosenKey, reason) {
+  const seen = new Set();
+  const options = [];
+  for (const [key, x] of ctx.simulated) {
+    if (seen.has(x.planKey)) continue;
+    seen.add(x.planKey);
+    const e = x.sim.effect;
+    const loss = x.sim.losses.some((l) => l.lossCents == null) ? null : usd(x.sim.losses.reduce((n, l) => n + l.lossCents, 0));
+    options.push({ option: x.letter, text: x.text, refundUsd: usd(e.refundCents), chargeUsd: usd(e.chargeCents), newHoldUsd: usd(e.holdCents), lossUsd: loss, within: x.sim.booked ? x.sim.mandate.within : null, chosen: x.planKey === ctx.simulated.get(chosenKey).planKey });
+  }
+  if (options.length < 2) return null;
+  const chosen = options.find((o) => o.chosen);
+  return { title: `Compared ${options.length} options`, detail: `Chose ${chosen.option}: ${String(reason).slice(0, 300)}`, options, chosen: chosen.option, reason: String(reason).slice(0, 500) };
+}
+
 export function createTools() {
   const tools = [];
   const add = (t) => tools.push(t);
@@ -148,13 +170,14 @@ export function createTools() {
       const result = {
         today: new Date(ctx.now()).toISOString().slice(0, 10),
         trip: { title: s.plan.title, destination: s.plan.destination, startDate: s.plan.startDate, endDate: tripEndDate(s.plan), travelers: s.plan.travelers, budgetUsd: usd(s.plan.budgetCents), budgetConfirmedByTraveler: Boolean(s.plan.budgetSource) },
-        items: s.plan.items.map((i) => { const st = itemState(s.ledger, i.id); return { id: i.id, day: i.day, date: dayDate(s.plan.startDate, i.day), title: i.title, category: i.category, priceUsd: usd(i.amountCents), paidInAdvance: i.prepaid, heldUsd: usd(st.heldCents), chargedUsd: usd(st.paidCents), sharedBy: i.participants }; }),
+        items: s.plan.items.map((i) => { const st = itemState(s.ledger, i.id); return { id: i.id, day: i.day, date: dayDate(s.plan.startDate, i.day), title: i.title, category: i.category, priceUsd: usd(i.amountCents), paidInAdvance: i.prepaid, chargesOn: i.prepaid ? 'already charged when booked' : itemDueOn(s.plan, i), heldUsd: usd(st.heldCents), chargedUsd: usd(st.paidCents), sharedBy: i.participants }; }),
+        howMoneyMoves: 'One PayPal hold covers the trip. An item that is not paid in advance is only held until its day (chargesOn) and charged then: cancelling it before that releases the money, nothing is charged and nothing is refunded. Only an item paid in advance is already charged, and cancelling that one is a refund.',
         planTotalUsd: usd(total),
-        limits: live ? { refundLeftUsd: usd(Math.max(0, m.terms.refundCapCents - Math.max(m.used.refundCents, m.used.cancelledCents ?? 0))), planIncreaseLeftUsd: usd(m.terms.planIncreaseCapCents - Math.max(0, total - m.baselineTotalCents)), validUntil: new Date(m.terms.validUntil).toISOString().slice(0, 10) } : null,
+        limits: live ? { refundLeftUsd: usd(Math.max(0, m.terms.refundCapCents - Math.max(m.used.refundCents, m.used.cancelledCents ?? 0))), planIncreaseLeftUsd: usd(m.terms.planIncreaseCapCents - Math.max(0, total - m.baselineTotalCents)), validUntil: new Date(m.terms.validUntil).toISOString().slice(0, 10), weather: m.terms.weather ?? null } : null,
         termsRecorded: s.policies.map((p) => ({ itemId: p.itemId, item: p.itemTitle, quote: p.quote ?? null, none: Boolean(p.none) })),
         bookingTerms: s.documents.length ? { pasted: s.documents.length, note: 'The traveler pasted booking terms. Before you cancel or lower any item, call read_documents and record what the terms say about that item with record_policy.' } : null,
       };
-      const lim = result.limits ? `you may cancel or refund up to $${result.limits.refundLeftUsd.toFixed(2)} and raise the plan by up to $${result.limits.planIncreaseLeftUsd.toFixed(2)}` : 'no limits are signed, so every change waits for the traveler';
+      const lim = result.limits ? `you may cancel or refund up to $${result.limits.refundLeftUsd.toFixed(2)} and raise the plan by up to $${result.limits.planIncreaseLeftUsd.toFixed(2)}${result.limits.weather ? `; on a wake-up the weather backs a change from ${result.limits.weather.rainPct}% chance of rain or ${result.limits.weather.windKph} km/h wind` : ''}` : 'no limits are signed, so every change waits for the traveler';
       return { result, event: { title: 'Looked at your trip', detail: `${s.plan.items.length} items, plan total ${money(total)}; ${lim}.` } };
     },
   });
@@ -169,6 +192,7 @@ export function createTools() {
       if (!date) return { result: { available: false, reason: 'The trip has no start date, so there is no forecast to look up.' }, event: { title: 'Tried to check the forecast', detail: 'The trip has no start date.' } };
       const fake = ctx.simulatedForecast?.[date];
       const f = fake ? { available: true, date, ...fake, simulated: true, source: 'Demo button (simulated, not a real forecast)' } : await ctx.sources.forecast({ destination: s.plan.destination, date });
+      ctx.forecasts.set(a.day, f);
       const detail = f.available
         ? `${s.plan.destination}, day ${a.day} (${date}): ${f.summary}, ${f.rainChancePct}% chance of rain, wind up to ${f.windKph} km/h.`
         : `Day ${a.day} (${date}): ${f.reason}`;
@@ -252,8 +276,11 @@ export function createTools() {
       try { ops = groundOps(toOperations(a), ctx, s); } catch (e) { return { result: { ok: false, error: e.message }, event: { title: 'Rejected an option', detail: e.message, rejected: true } }; }
       const sim = await ctx.simulate(ops);
       if (!sim.ok) return { result: { ok: false, error: sim.error }, event: { title: 'Tried an option that does not work', detail: sim.error, rejected: true } };
-      ctx.simulated.set(canon(ops), { ops, sim, edit: a });
-      const letter = String.fromCharCode(64 + ctx.simulated.size);
+      const key = canon(ops);
+      const text = optionText(sim, ops, s);
+      // asked again after something was learned (a rule recorded), the option keeps its letter and gets the fresh answer
+      const letter = ctx.simulated.get(key)?.letter ?? String.fromCharCode(65 + ctx.simulated.size);
+      ctx.simulated.set(key, { ops, sim, edit: a, text, planKey: planKey(sim.newPlan), letter });
       const e = sim.effect;
       const unchecked = sim.losses.filter((l) => l.unchecked).map((l) => l.title);
       const result = {
@@ -279,7 +306,7 @@ export function createTools() {
 
   add({
     name: 'submit_edit',
-    description: 'Hand over your final choice. It must be exactly an edit you simulated. Code decides what happens: inside the traveler\'s limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task. Fill the same lists as simulate_edit, plus summary and reason.',
+    description: 'Hand over your final choice. It must be exactly an edit you simulated, and it must carry its basis in authority. Code checks the basis and decides what happens: inside the traveler\'s limits it is carried out, otherwise it becomes a proposal the traveler confirms. Before money moves at PayPal you must have simulated at least two different plans. Ends the task. Fill the same lists as simulate_edit, plus summary, reason and authority.',
     terminal: true,
     parameters: {
       type: 'object',
@@ -287,23 +314,42 @@ export function createTools() {
         ...EDIT_PROPERTIES,
         summary: { type: 'string', description: 'One or two plain sentences to the traveler about what you chose (under 400 characters; longer is cut).' },
         reason: { type: 'string', description: 'Why this option over the others you tried (under 500 characters; longer is cut).' },
+        authority: {
+          type: 'object',
+          description: 'What this change rests on. source traveler: the traveler asked for it; quote the part of their message that asks for this change, letter for letter. source threshold: only on a scheduled wake-up, when a forecast you fetched with get_forecast in this run crosses a weather limit the traveler signed (see limits.weather in get_trip); give the metric and the trip day. A question is not a request: if the traveler only asks, answer with no_change.',
+          properties: {
+            source: { type: 'string', enum: ['traveler', 'threshold'] },
+            quote: { type: 'string', maxLength: 300, description: 'With traveler: the traveler\'s own words, copied exactly.' },
+            metric: { type: 'string', enum: ['rainPct', 'windKph'], description: 'With threshold: which limit the forecast crossed.' },
+            day: { type: 'integer', description: 'With threshold: the trip day of that forecast.' },
+          },
+          required: ['source'],
+        },
       },
-      required: ['summary', 'reason'],
+      required: ['summary', 'reason', 'authority'],
     },
     run: async (a, ctx) => {
       const s = await ctx.readState();
       let ops;
-      const { summary, reason, ...edit } = a;
-      try { ops = groundOps(toOperations(edit), ctx, s); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'Rejected the choice', detail: e.message, rejected: true }, retry: true }; }
-      if (!ctx.simulated.has(canon(ops))) {
-        const tried = [...ctx.simulated.values()].map((x, i) => `${String.fromCharCode(65 + i)}: ${JSON.stringify(x.edit)}`).join(' | ').slice(0, 900);
-        return { result: { accepted: false, error: `This is not an edit you simulated. ${tried ? `You simulated ${tried}. Submit exactly one of them: the same lists with the same values, nothing added.` : 'Call simulate_edit with exactly this edit first, then submit it.'}` }, event: { title: 'Rejected the choice', detail: 'It was not simulated first.', rejected: true }, retry: true };
+      const { summary, reason, authority, ...edit } = a;
+      const refuse = (error, title = 'Rejected the choice', detail = error) => ({ result: { accepted: false, error }, event: { title, detail, rejected: true }, retry: true });
+      try { ops = groundOps(toOperations(edit), ctx, s); } catch (e) { return refuse(e.message); }
+      const key = canon(ops);
+      if (!ctx.simulated.has(key)) {
+        const tried = [...ctx.simulated.values()].map((x) => `${x.letter}: ${JSON.stringify(x.edit)}`).join(' | ').slice(0, 900);
+        return refuse(`This is not an edit you simulated. ${tried ? `You simulated ${tried}. Submit exactly one of them: the same lists with the same values, nothing added.` : 'Call simulate_edit with exactly this edit first, then submit it.'}`, 'Rejected the choice', 'It was not simulated first.');
       }
-      const decision = { title: 'Chose an option', detail: String(reason).slice(0, 500), agentReason: true, note: String(summary).slice(0, 400) };
+      let basis;
+      try { basis = verifyAuthority(authority, { trigger: ctx.trigger, travelerText: ctx.travelerText ?? '', mandate: s.mandate, now: ctx.now(), forecasts: ctx.forecasts }); } catch (e) { return refuse(e.message, 'Rejected the choice: no basis for it'); }
+      const chosen = ctx.simulated.get(key);
+      const tried = new Set([...ctx.simulated.values()].map((x) => x.planKey)).size;
+      if (chosen.sim.booked && chosen.sim.effect.touchesPayPal && tried < ctx.minOptions) return refuse(MIN_OPTIONS_MESSAGE(tried, ctx.minOptions), 'Rejected the choice', `Money would move on ${tried} option; it needs to be weighed against another.`);
+      const compare = comparison(ctx, key, reason);
+      const decision = { title: 'Chose an option', detail: String(reason).slice(0, 500), agentReason: true, note: String(summary).slice(0, 400), authority: basis, basis: describeAuthority(basis) };
       let out;
-      try { out = await ctx.submitEdit({ ops, agentNote: String(summary).slice(0, 400), runId: ctx.runId }); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'The choice was refused', detail: e.message, rejected: true }, retry: true }; }
+      try { out = await ctx.submitEdit({ ops, agentNote: String(summary).slice(0, 400), runId: ctx.runId, authority: basis }); } catch (e) { return refuse(e.message, 'The choice was refused'); }
       const result = { accepted: true, outcome: out.outcome, summary: out.summary, ...(out.error ? { error: out.error } : {}) };
-      return { result, final: { kind: 'submitted', outcome: out.outcome, proposalId: out.proposalId, summary: out.summary, within: out.mandate?.within, reasons: out.mandate?.reasons?.map((r) => r.text) ?? [], money: out.money, effect: out.effect }, decision };
+      return { result, final: { kind: 'submitted', outcome: out.outcome, proposalId: out.proposalId, summary: out.summary, within: out.mandate?.within, reasons: out.mandate?.reasons?.map((r) => r.text) ?? [], money: out.money, effect: out.effect }, decision, ...(compare ? { compare } : {}) };
     },
   });
 
