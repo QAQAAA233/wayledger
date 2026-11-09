@@ -29,8 +29,8 @@ function sampleTerms() {
   const items = S.trip.plan.items;
   const act = items.find((i) => i.category === 'activity') ?? items.find((i) => i.category !== 'lodging') ?? items[0];
   const other = items.find((i) => i !== act && i.category !== 'lodging');
-  const cut = act.date ? new Date(Date.parse(`${act.date}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10) : isoIn(2);
-  return `${act.title}: free cancellation until ${cut} 12:00, after that non-refundable.${other ? `\n${other.title}: non-refundable from the moment of booking.` : ''}`;
+  const cut = act.date ?? isoIn(2);
+  return `${act.title}: free cancellation until ${cut} 23:59, after that non-refundable.${other ? `\n${other.title}: non-refundable from the moment of booking.` : ''}`;
 }
 const TOOL_LABEL = { get_trip: 'Trip', get_forecast: 'Forecast', search_places: 'Places', get_payment_status: 'PayPal', read_documents: 'Terms', record_policy: 'Terms', simulate_edit: 'Option', no_change: 'Done', ask_traveler: 'Question' };
 
