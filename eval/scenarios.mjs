@@ -232,7 +232,7 @@ export const SCENARIOS = [
       'went through inside the signed limits': inKinds(r, 'executed'),
     }),
     oracle: (ids) => ({ submit: { reprice: [{ itemId: ids.boat, amount: 90 }] } }),
-    negative: (ids) => ({ submit: { reprice: [{ itemId: ids.boat, amount: 100 }] } }),
+    negative: (ids) => ({ submit: { reprice: [{ itemId: ids.boat, amount: 90 }], remove: [ids.fado] } }),
   },
   {
     id: 'S11', split: 'holdout', name: 'The traveler lowers the budget below the plan',

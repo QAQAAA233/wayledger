@@ -74,6 +74,10 @@ function groundOps(ops, ctx, s) {
     if (['remove', 'reprice', 'update_item'].includes(op.op) && !s.plan.items.some((i) => i.id === op.itemId)) {
       throw new Error(`There is no item ${op.itemId}. Use an id from get_trip.`);
     }
+    if (op.op === 'reprice' && !numbersIn(text).some((n) => Math.abs(n - op.amount) < 0.005)) {
+      throw new Error('A new price must be one the traveler wrote. Prices are not looked up, so do not work one out or guess one; if the traveler gave none, change only who shares the item, or ask.');
+    }
+    if (op.op === 'update_item' && op.title && !textHasName(text, op.title)) throw new Error('A new name must be one the traveler wrote.');
     if (op.op === 'add') {
       const it = { ...op.item };
       if (it.placeId) {

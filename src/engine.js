@@ -210,7 +210,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
   };
 
   // Words from the system prompts must never show up as a trip title: a model can be talked into repeating them.
-  const scrub = (plan) => ({ ...plan, title: ai?.secrets && sharesLongRun(plan.title, ai.secrets) ? `Trip to ${plan.destination || 'your destination'}` : plan.title });
+  // (found live: the real model repeated its chat header and the first words of its prompt, which are shorter than a long run)
+  const LEAK_MARKERS = /cutting knowledge date|today date:|system prompt|you are the (?:planning|trip) agent|reply with json|<\|[a-z_]+\|>/i;
+  const isLeak = (s) => typeof s === 'string' && (LEAK_MARKERS.test(s) || (ai?.secrets && sharesLongRun(s, ai.secrets, 16)));
+  const scrub = (plan) => {
+    if ([plan.destination, ...plan.travelers, ...plan.items.map((i) => i.title)].some(isLeak)) throw new PlanError('The plan repeated the planner\'s own instructions.');
+    return { ...plan, title: isLeak(plan.title) ? `Trip to ${plan.destination || 'your destination'}` : plan.title };
+  };
 
   // What a plan edit would do, worked out without changing anything. Used by the agent to compare options and by
   // submitEdit, so what the agent was shown is what the engine does.

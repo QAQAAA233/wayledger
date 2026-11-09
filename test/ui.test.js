@@ -366,3 +366,33 @@ test('a demo-limit message is shown without a "Try again" button, and a server h
     await page.waitForSelector('[data-act="retry-error"]', { timeout: 5000 });
   });
 });
+
+test('cancelling something the terms make non-refundable waits for the person, and the card shows what it costs with the sentence that says so', { skip }, async () => {
+  const SENTENCE = 'Sunset boat tour: non-refundable from the moment of booking.';
+  const boatId = (m) => JSON.parse(m.find((x) => x.role === 'tool').content).items.find((i) => /boat/i.test(i.title)).id;
+  const model = scriptedModel([
+    { calls: [{ name: 'get_trip', args: {} }] },
+    { calls: [{ name: 'read_documents', args: {} }] },
+    ({ messages }) => ({ calls: [{ name: 'record_policy', args: { docId: 'd1', itemId: boatId(messages), quote: SENTENCE, nonRefundable: true } }] }),
+    ({ messages }) => ({ calls: [{ name: 'simulate_edit', args: { remove: [boatId(messages)] } }] }),
+    ({ messages }) => ({ calls: [{ name: 'submit_edit', args: { remove: [boatId(messages)], summary: 'Removed the boat tour.', reason: 'Storm.' } }] }),
+  ]);
+  await withApp({ model }, async (page, app) => {
+    await booked(page);
+    await page.click('details.terms summary');
+    await page.type('#terms', `${SENTENCE}\nSintra day trip: non-refundable from the moment of booking.`);
+    await page.click('[data-act="terms-save"]');
+    await page.waitForSelector('.doc');
+    await page.type('#change', 'There is a storm on the boat day. Cancel the boat tour.');
+    await page.click('[data-act="change"]');
+    await page.waitForSelector('.proposal .notice.waits', { timeout: 10000 });
+    const card = await text(page, '.proposal');
+    assert.match(card, /What this would cost you at the operator/);
+    assert.match(card, /Sunset boat tour: \$180\.00 \(the terms say it is non-refundable\)/);
+    assert.ok(card.includes(`“${SENTENCE}”`), 'the sentence is on the card');
+    assert.match(card, /By your terms this would cost you \$180\.00 that the operator keeps, so it needs your OK/);
+    assert.equal(app.fake.refs.size, 0, 'nothing was refunded');
+    assert.match(await text(page, '#trail'), /Waiting for your OK/);
+    await noJargon(page, 'the card that waits for the person');
+  });
+});

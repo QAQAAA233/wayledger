@@ -61,7 +61,7 @@ async function run(env, spend, system, user, schema, validate) {
     }
   }
   // Plan rules (budget, limits) are worth showing; parser and model internals are not.
-  throw new AIError(`The model's answer could not be used${planRule ? `: ${planRule}` : ''}. Nothing was changed - you can try again.`);
+  throw new AIError(`The model's answer could not be used${planRule ? `: ${planRule.replace(/\.$/, '')}` : ''}. Nothing was changed - you can try again.`);
 }
 
 export function createAI(env, { spend } = {}) {

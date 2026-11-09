@@ -313,11 +313,28 @@ test('a model that never reads the pasted terms cannot cancel anything: the code
   assert.match(sim.termsNotRead, /nothing is recorded about: Sunset boat tour/, 'the simulation already said so');
 });
 
+test('a price the traveler never wrote cannot be put on an existing item: models may not work prices out or invent them', async () => {
+  const m = scriptedModel([
+    { calls: [T('simulate_edit', { reprice: [{ itemId: 'i1', amount: 420 }, { itemId: 'i2', amount: 120 }] })] },
+    { calls: [T('simulate_edit', { reprice: [{ itemId: 'i2', amount: 150 }] })] },
+    { calls: [T('simulate_edit', { update: [{ itemId: 'i2', title: 'Deluxe yacht cruise' }] })] },
+    { calls: [T('no_change', { note: 'stopped' })] },
+  ]);
+  const wd = await world({ run: m, terms: TERMS_OK });
+  const before = moneyCalls(wd).length;
+  await startRun(wd, 'Cy cannot come anymore, and the boat tour is now $150.');
+  const [a, b, c] = allResults(m.log.at(-1).messages);
+  assert.match(a.error, /new price must be one the traveler wrote/);
+  assert.equal(b.ok, true, 'a price the traveler wrote is fine');
+  assert.match(c.error, /new name must be one the traveler wrote/);
+  assert.equal(moneyCalls(wd).length, before, 'and nothing moved');
+});
+
 test('a submit that differs from what was simulated is refused with the simulated edit shown; an update that changes nothing is ignored', async () => {
   const edit = { reprice: [{ itemId: 'i3', amount: 200 }] };
   const m = scriptedModel([
     { calls: [T('simulate_edit', edit)] },
-    { calls: [T('submit_edit', { reprice: [{ itemId: 'i3', amount: 190 }], summary: 'Raised it.', reason: 'The operator asked.' })] },
+    { calls: [T('submit_edit', { reprice: [{ itemId: 'i3', amount: 200 }, { itemId: 'i1', amount: 200 }], summary: 'Raised it.', reason: 'The operator asked.' })] },
     { calls: [T('submit_edit', { ...edit, update: [{ itemId: 'i3' }], summary: 'Raised it.', reason: 'The operator asked.' })] },
   ]);
   const wd = await world({ run: m, terms: TERMS_OK });

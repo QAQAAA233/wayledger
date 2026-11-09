@@ -12,7 +12,7 @@ const root = new URL('./results/', import.meta.url).pathname.replace(/^\/([A-Za-
 const runs = tags.flatMap((tag) => {
   const dir = path.join(root, tag, 'runs');
   return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))) : [];
-}).filter((r) => !args.split || r.split === args.split).filter((r) => r.approach === 'agent' || r.approach === 'baseline');
+}).filter((r) => !args.split || r.split === args.split).filter((r) => !(args.skip ?? '').split(',').includes(`${r.tag}:${r.scenario}`)).filter((r) => r.approach === 'agent' || r.approach === 'baseline');
 
 const scenarioIds = [...new Set(runs.map((r) => r.scenario))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 const groups = [...new Set(runs.map((r) => `${r.approach}|${r.model}`))].sort();
