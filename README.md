@@ -98,6 +98,8 @@ Full tables per scenario, the method, what was changed after looking at which re
 
 <!-- EVAL:END -->
 
+**One ground truth was changed after these tables, before any rerun.** After the second review the product rule became: a change of who is on the trip or who shares an item always waits for the traveler's OK. The ideal finish of three scenarios, S09 (Cy cannot come), S22 (a dinner for Ana and Ben only) and S28 (a fourth traveler joins), was therefore changed from "executed" to "proposed" in commit `d16f621` (2026-11-10), for a product reason and before any model was run under the rule. The tables above were run earlier and are not re-scored; the details are in [`eval/README.md`](eval/README.md#what-was-run-in-order-and-what-was-changed-after-which-result).
+
 ## Seen working on the live site (PayPal sandbox)
 
 Real Chrome, the real PayPal sandbox window, the deployed Worker, the real models, the real forecast and place services:

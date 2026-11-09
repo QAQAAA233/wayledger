@@ -312,7 +312,12 @@ function budgetBar() {
   const t = S.trip;
   const p = t.plan;
   if (t.closed) return '';
-  if (p.budgetSource) return `<div class="budget ok">Budget <b>${usd(p.budgetCents)}</b> &middot; ${p.budgetSource === 'user' ? 'confirmed by you' : 'from your own words'}${t.owner ? ` <button class="linkbtn" data-act="budget-edit">change</button>` : ''}${S.editBudget ? budgetForm(p) + errorBox('budget') : ''}</div>`;
+  if (p.budgetSource) {
+    const used = t.totals.plannedCents;
+    const room = (p.budgetCents ?? 0) - used;
+    const why = room > 0 ? `The plan uses ${usd(used)} of it on purpose: the rest is room for changes.` : 'The plan uses all of it, so a change that costs more needs your OK.';
+    return `<div class="budget ok">Budget <b>${usd(p.budgetCents)}</b> &middot; ${p.budgetSource === 'user' ? 'confirmed by you' : 'from your own words'}${t.owner ? ` <button class="linkbtn" data-act="budget-edit">change</button>` : ''} <span class="why" id="budget-why">${why}</span>${S.editBudget ? budgetForm(p) + errorBox('budget') : ''}</div>`;
+  }
   if (!t.owner) return '<div class="budget warn">The traveler has not confirmed a budget yet, so nothing can be held.</div>';
   return `<div class="budget warn"><div><b>Confirm your budget first.</b> Nothing is held until you do. ${p.budgetCents ? `The planner suggested ${usd(p.budgetCents)}, but a budget only counts when it comes from you.` : 'Your message did not state one.'}</div>${budgetForm(p)}${errorBox('budget')}</div>`;
 }

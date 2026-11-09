@@ -67,6 +67,7 @@ test('after the plan is drawn the PayPal button is on the page within 5 seconds,
     const state = await page.evaluate(() => ({ spinning: Boolean(document.querySelector('.spin')), sendDisabled: document.querySelector('[data-act="change"]').disabled, owner: Object.keys(localStorage).some((k) => k.startsWith('wayledger:owner:')) }));
     assert.deepEqual(state, { spinning: false, sendDisabled: false, owner: true });
     assert.match(await text(page, '.budget'), /\$1,200\.00.*from your own words/);
+    assert.match(await text(page, '#budget-why'), /The plan uses \$840\.00 of it on purpose: the rest is room for changes\./, 'the traveler can see why the plan does not use the whole budget');
     const limits = await page.$$eval('#mandate-form input[type=number]', (els) => els.map((e) => e.value));
     assert.deepEqual(limits, ['210', '210'], 'a quarter of the plan, offered and editable');
     assert.match(await text(page, '.proposal'), /Most that can move in PayPal/);
