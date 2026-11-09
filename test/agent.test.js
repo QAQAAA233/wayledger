@@ -111,8 +111,8 @@ test('the same request outside the limits: the agent stops, nothing moves, and t
 test('a choice that needs a new PayPal hold is never the agent\'s to make, even with room in the limits', async () => {
   const add = (name, amount) => [
     { calls: [T('get_trip')] },
-    { calls: [T('simulate_edit', { operations: [{ op: 'add', item: { day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] } }] })] },
-    { calls: [T('submit_edit', { operations: [{ op: 'add', item: { day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] } }], summary: 'Added it.', reason: 'You asked.' })] },
+    { calls: [T('simulate_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }] })] },
+    { calls: [T('submit_edit', { add: [{ day: 3, title: name, category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }], summary: 'Added it.', reason: 'You asked.' })] },
   ];
   const wd = await world({ run: scriptedModel(add('Helicopter tour', 300)), terms: TERMS_OK });
   const run = await startRun(wd, 'Please add a Helicopter tour on day 3 for $300.');
@@ -123,8 +123,8 @@ test('a choice that needs a new PayPal hold is never the agent\'s to make, even 
 });
 
 test('inside the buffer an added item needs no PayPal call at all: the money was already held', async () => {
-  const ops = [{ op: 'add', item: { day: 3, title: 'Sintra lunch', category: 'food', amount: 100, amountBasis: 'user_given', participants: ['Ana'] } }];
-  const wd = await world({ run: scriptedModel([{ calls: [T('simulate_edit', { operations: ops })] }, { calls: [T('submit_edit', { operations: ops, summary: 'Lunch added.', reason: 'You asked.' })] }]), terms: TERMS_OK });
+  const edit = { add: [{ day: 3, title: 'Sintra lunch', category: 'food', amount: 100, amountBasis: 'user_given', participants: ['Ana'] }] };
+  const wd = await world({ run: scriptedModel([{ calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: 'Lunch added.', reason: 'You asked.' })] }]), terms: TERMS_OK });
   const before = moneyCalls(wd).length;
   const run = await startRun(wd, 'Add Sintra lunch for $100.');
   assert.equal(run.final.outcome, 'executed');
@@ -138,7 +138,7 @@ test('hard condition 1: without a model that reads the terms, the loss to the op
   // A stand-in that never reads the documents: it asks the code what cancelling would cost, and gets no answer.
   const blind = scriptedModel([
     { calls: [T('get_trip')] },
-    ({ messages }) => ({ calls: [T('simulate_edit', { operations: [{ op: 'remove', itemId: boatOf(messages).id }] })] }),
+    ({ messages }) => ({ calls: [T('simulate_edit', { remove: [boatOf(messages).id] })] }),
   ]);
   const wd = await world({ run: blind, terms: TERMS_OK });
   const run = await startRun(wd);
@@ -154,7 +154,7 @@ test('hard condition 1: without a model that reads the terms, the loss to the op
     { calls: [T('get_trip')] },
     { calls: [T('read_documents')] },
     ({ messages }) => ({ calls: [T('record_policy', { docId: 'd1', itemId: boatOf(messages).id, quote: BOAT_QUOTE, freeCancelUntil: '2026-05-06T12:00' }), T('record_policy', { docId: 'd1', itemId: facts(messages).items.find((i) => /Sintra/.test(i.title)).id, quote: SINTRA_QUOTE, nonRefundable: true })] }),
-    ({ messages }) => { const f = facts(messages); return { calls: [T('simulate_edit', { operations: [{ op: 'remove', itemId: f.items.find((i) => /boat/i.test(i.title)).id }] }), T('simulate_edit', { operations: [{ op: 'remove', itemId: f.items.find((i) => /Sintra/.test(i.title)).id }] })] }; },
+    ({ messages }) => { const f = facts(messages); return { calls: [T('simulate_edit', { remove: [f.items.find((i) => /boat/i.test(i.title)).id] }), T('simulate_edit', { remove: [f.items.find((i) => /Sintra/.test(i.title)).id] })] }; },
     { calls: [T('no_change', { note: 'enough looked at' })] },
   ]);
   const wd2 = await world({ run: reading, terms: TERMS_OK });
@@ -178,11 +178,11 @@ test('hard condition 2: one model call cannot do it; each step depends on the to
   }
   // and what it finally submitted came out of those results, not out of the first question
   const sent = JSON.parse(model.log.at(-1).messages.findLast((m) => m.role === 'assistant' && m.tool_calls.some((c) => c.function.name === 'simulate_edit')).tool_calls[0].function.arguments);
-  assert.deepEqual(sent.operations[1].item.placeId, 'wd:Q1262183');
+  assert.deepEqual(sent.add[0].placeId, 'wd:Q1262183');
   assert.deepEqual(run.events.filter((e) => e.kind === 'model').map((e) => e.turn), [1, 2, 3, 4, 5, 6, 7]);
 
   // a model that answers in one go is refused: an edit that was not simulated first is not accepted
-  const oneShot = scriptedModel([{ calls: [T('submit_edit', { operations: [{ op: 'reprice', itemId: 'i1', amount: 100 }], summary: 'Done.', reason: 'Because.' })] }]);
+  const oneShot = scriptedModel([{ calls: [T('submit_edit', { reprice: [{ itemId: 'i1', amount: 100 }], summary: 'Done.', reason: 'Because.' })] }]);
   const wd2 = await world({ run: oneShot, terms: TERMS_OK });
   const run2 = await startRun(wd2);
   assert.equal(run2.final.kind, 'stopped');
@@ -194,24 +194,26 @@ test('hard condition 2: one model call cannot do it; each step depends on the to
 // ---- what the model is not allowed to make up -----------------------------------------------------------------------
 
 test('names and prices are checked by code before an edit is even simulated', async () => {
-  const bad = (op, why) => async () => {
-    const m = scriptedModel([{ calls: [T('get_trip')] }, { calls: [T('simulate_edit', { operations: [op] })] }, { calls: [T('no_change', { note: 'x' })] }]);
+  const bad = (edit, why) => async () => {
+    const m = scriptedModel([{ calls: [T('get_trip')] }, { calls: [T('simulate_edit', edit)] }, { calls: [T('no_change', { note: 'x' })] }]);
     const wd = await world({ run: m, terms: TERMS_OK });
     await startRun(wd);
     const r = allResults(m.log.at(-1).messages).find((x) => x.ok === false);
     assert.ok(r, why);
     return r.error;
   };
-  assert.match(await bad({ op: 'add', item: { day: 2, placeId: 'wd:Q999', category: 'activity', amount: 90, amountBasis: 'same_as_replaced' } }, 'a place that no search returned')(), /did not come from search_places/);
-  assert.match(await bad({ op: 'add', item: { day: 2, title: 'Oceanario de Lisboa', category: 'activity', amount: 90, amountBasis: 'user_given' } }, 'a name from nowhere')(), /Names are not made up/);
-  assert.match(await bad({ op: 'add', item: { day: 2, title: 'Helicopter tour', category: 'activity', amount: 90, amountBasis: 'user_given' } }, 'a price the person never wrote')(), /Names are not made up|price the traveler actually wrote/);
-  assert.match(await bad({ op: 'remove', itemId: 'i99' }, 'an item that does not exist')(), /no item i99/);
-  assert.match(await bad({ op: 'set_travelers', travelers: ['Ana', 'Ben', 'Zed'] }, 'a traveler nobody named')(), /Names are not made up/);
+  assert.match(await bad({ add: [{ day: 2, placeId: 'wd:Q999', category: 'activity', amountBasis: 'same_as_replaced', replaces: 'i2' }], remove: ['i2'] }, 'a place that no search returned')(), /did not come from search_places/);
+  assert.match(await bad({ add: [{ day: 2, title: 'Oceanario de Lisboa', category: 'activity', amount: 90, amountBasis: 'user_given' }] }, 'a name from nowhere')(), /Names are not made up/);
+  assert.match(await bad({ add: [{ day: 2, title: 'Helicopter tour', category: 'activity', amount: 90, amountBasis: 'user_given' }] }, 'a price the person never wrote')(), /Names are not made up|price the traveler actually wrote/);
+  assert.match(await bad({ remove: ['i99'] }, 'an item that does not exist')(), /no item i99/);
+  assert.match(await bad({ add: [{ day: 2, placeId: 'wd:Q1262183', category: 'activity', amountBasis: 'same_as_replaced', replaces: 'i3' }] }, 'a price borrowed from an item that is not removed')(), /did not come from search_places|replaces/);
+  assert.match(await bad({}, 'an empty edit')(), /empty/);
+  assert.match(await bad({ setTravelers: ['Ana', 'Ben', 'Zed'] }, 'a traveler nobody named')(), /Names are not made up/);
 });
 
 test('a place name or price the person wrote is allowed; a price that matches nothing they wrote is not', async () => {
-  const mk = (amount) => [{ op: 'add', item: { day: 3, title: 'Helicopter tour', category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] } }];
-  const m = scriptedModel([{ calls: [T('simulate_edit', { operations: mk(250) })] }, { calls: [T('simulate_edit', { operations: mk(99) })] }, { calls: [T('no_change', { note: 'x' })] }]);
+  const mk = (amount) => ({ add: [{ day: 3, title: 'Helicopter tour', category: 'activity', amount, amountBasis: 'user_given', participants: ['Ana'] }] });
+  const m = scriptedModel([{ calls: [T('simulate_edit', mk(250))] }, { calls: [T('simulate_edit', mk(99))] }, { calls: [T('no_change', { note: 'x' })] }]);
   const wd = await world({ run: m, terms: TERMS_OK });
   await startRun(wd, 'Please add the Helicopter tour on day 3, it costs $250.');
   const [first, second] = allResults(m.log.at(-1).messages);
@@ -292,3 +294,36 @@ test('PayPal facts reach the model without the buyer: no email, name, address or
 });
 
 
+
+test('a model that never reads the pasted terms cannot cancel anything: the code refuses and tells it what to do', async () => {
+  const lazy = scriptedModel([
+    { calls: [T('get_trip')] },
+    ({ messages }) => ({ calls: [T('simulate_edit', { remove: [boatOf(messages).id] })] }),
+    ({ messages }) => ({ calls: [T('submit_edit', { remove: [boatOf(messages).id], summary: 'Removed it.', reason: 'Storm.' })] }),
+  ]);
+  const wd = await world({ run: lazy, terms: TERMS_OK });
+  const before = moneyCalls(wd).length;
+  const run = await startRun(wd);
+  assert.equal(run.final.kind, 'stopped');
+  assert.equal(wd.state().plan.items.some((i) => /boat/i.test(i.title)), true, 'the boat tour is still in the plan');
+  assert.equal(moneyCalls(wd).length, before, 'no refund went out');
+  const refused = run.events.find((e) => e.title === 'The choice was refused');
+  assert.match(refused.detail, /pasted booking terms[\s\S]*read_documents/);
+  const sim = allResults(lazy.log[2].messages).find((r) => r.option);
+  assert.match(sim.termsNotRead, /nothing is recorded about: Sunset boat tour/, 'the simulation already said so');
+});
+
+test('a submit that differs from what was simulated is refused with the simulated edit shown; an update that changes nothing is ignored', async () => {
+  const edit = { reprice: [{ itemId: 'i3', amount: 200 }] };
+  const m = scriptedModel([
+    { calls: [T('simulate_edit', edit)] },
+    { calls: [T('submit_edit', { reprice: [{ itemId: 'i3', amount: 190 }], summary: 'Raised it.', reason: 'The operator asked.' })] },
+    { calls: [T('submit_edit', { ...edit, update: [{ itemId: 'i3' }], summary: 'Raised it.', reason: 'The operator asked.' })] },
+  ]);
+  const wd = await world({ run: m, terms: TERMS_OK });
+  const run = await startRun(wd, 'The Sintra day trip operator now wants $200 for it.');
+  const refusal = allResults(m.log[2].messages).find((r) => r.accepted === false);
+  assert.match(refusal.error, /You simulated A: \{"reprice":\[\{"itemId":"i3","amount":200\}\]\}\. Submit exactly one of them/);
+  assert.deepEqual([run.final.kind, run.final.outcome], ['submitted', 'executed'], 'the empty update did not make it a different edit');
+  assert.equal(wd.state().plan.items.find((i) => i.id === 'i3').amountCents, 20000);
+});

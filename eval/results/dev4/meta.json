@@ -1,0 +1,29 @@
+{
+ "tag": "dev4",
+ "startedAt": "2026-11-09T12:28:33.746Z",
+ "commit": "3897cbe",
+ "uncommittedChangesInSrcOrEval": true,
+ "approaches": [
+  "agent",
+  "baseline"
+ ],
+ "models": [
+  "gemma",
+  "oss"
+ ],
+ "reps": 3,
+ "split": "dev",
+ "fileHashes": {
+  "src/agent/prompts.js": "9f6cd814d670b305",
+  "src/agent/tools.js": "6a11d11c4d11287f",
+  "src/agent/loop.js": "ee9fea40c35d383b",
+  "src/agent/schema.js": "02eb5719743bef51",
+  "src/agent/model.js": "5cc19c8791354b6d",
+  "src/domain/policy.js": "ff355b6be762b3ef",
+  "src/domain/mandate.js": "6fcef43951121b68",
+  "src/domain/delta.js": "81bb0b0bfb4e009e",
+  "src/engine.js": "e734d753b109255a",
+  "eval/world.mjs": "88c9bb7bdc5ef61e",
+  "eval/scenarios.mjs": "11373bccb0fe6097"
+ }
+}

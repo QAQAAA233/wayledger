@@ -51,8 +51,9 @@ export async function mandateIntact(m) {
 }
 
 // Is this change inside the signed limits? `facts` come from the engine, never from the model:
-//   actions, humanOnly (the change touches the budget), planAfterTotalCents, now
-export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now }) {
+//   actions, humanOnly (the change touches the budget), planAfterTotalCents, now, operatorLossCents (what the terms say the
+//   operator would keep)
+export function evaluateMandate(mandate, { actions, humanOnly = false, planAfterTotalCents, now, operatorLossCents = 0 }) {
   const reasons = [];
   const refundCents = actions.filter((a) => a.type === 'refund').reduce((s, a) => s + a.cents, 0);
   const planIncreaseCents = mandate ? planAfterTotalCents - mandate.baselineTotalCents : 0;
@@ -74,6 +75,7 @@ export function evaluateMandate(mandate, { actions, humanOnly = false, planAfter
   if (actions.some((a) => a.type === 'hold')) reasons.push({ code: 'NEEDS_PAYPAL_APPROVAL', text: 'This needs a new PayPal hold, and only you can approve that in PayPal.' });
   if (actions.some((a) => !MANDATE_ACTIONS.includes(a.type) && a.type !== 'hold')) reasons.push({ code: 'SETTLEMENT_IS_YOURS', text: 'Charging or releasing the trip hold at the end is always your decision.' });
   if (humanOnly) reasons.push({ code: 'BUDGET_IS_YOURS', text: 'Only you can change your budget.' });
+  if (operatorLossCents > 0) reasons.push({ code: 'LOSS_TO_OPERATOR', text: `By your terms this would cost you ${dollars(operatorLossCents)} that the operator keeps, so it needs your OK.` });
   return { within: reasons.length === 0, reasons, refundCents, planIncreaseCents, remaining };
 }
 

@@ -1,0 +1,87 @@
+// Turns the raw run records into the numbers and tables. Every figure here is computed by this program from the records;
+// nothing is typed in by hand.
+//
+//   node eval/report.mjs --name holdout --tags holdout1 [--split holdout]
+import fs from 'node:fs';
+import path from 'node:path';
+import { SCENARIOS } from './scenarios.mjs';
+
+const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
+const tags = (args.tags ?? args.name).split(',');
+const root = new URL('./results/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const runs = tags.flatMap((tag) => {
+  const dir = path.join(root, tag, 'runs');
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))) : [];
+}).filter((r) => !args.split || r.split === args.split).filter((r) => r.approach === 'agent' || r.approach === 'baseline');
+
+const scenarioIds = [...new Set(runs.map((r) => r.scenario))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+const groups = [...new Set(runs.map((r) => `${r.approach}|${r.model}`))].sort();
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const sd = (xs) => { const m = mean(xs); return Math.sqrt(mean(xs.map((x) => (x - m) ** 2))); };
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+const pct = (x) => `${(100 * x).toFixed(0)}%`;
+const usd = (c) => `$${(c / 100).toFixed(2)}`;
+
+function summarize(rs) {
+  const byScenario = new Map();
+  for (const r of rs) byScenario.set(r.scenario, [...(byScenario.get(r.scenario) ?? []), r]);
+  const reps = [...new Set(rs.map((r) => r.rep))].sort();
+  const perRepRate = reps.map((k) => mean(rs.filter((r) => r.rep === k).map((r) => (r.satisfied ? 1 : 0))));
+  const scen = [...byScenario.values()];
+  return {
+    runs: rs.length, scenarios: scen.length, reps: reps.length,
+    satisfied: mean(rs.map((r) => (r.satisfied ? 1 : 0))),
+    allRepsSatisfied: mean(scen.map((g) => (g.every((r) => r.satisfied) ? 1 : 0))),
+    ideal: mean(rs.map((r) => (r.ideal ? 1 : 0))),
+    unnecessaryRefundCents: rs.reduce((n, r) => n + (r.unnecessaryRefundCents ?? 0), 0),
+    humanApprovals: rs.filter((r) => r.needsHuman).length,
+    unnecessaryHuman: rs.filter((r) => r.unnecessaryHuman).length,
+    lossCents: rs.reduce((n, r) => n + (r.lossCents ?? 0), 0),
+    lossRuns: rs.filter((r) => (r.lossCents ?? 0) > 0).length,
+    moneyMovedOutside: rs.filter((r) => r.moneyMovedCents > 0 && !['executed'].includes(r.kind)).length,
+    stopped: rs.filter((r) => r.kind === 'stopped' || r.kind === 'error').length,
+    flip: mean(scen.map((g) => (g.some((r) => r.satisfied) && g.some((r) => !r.satisfied) ? 1 : 0))),
+    sameOutcome: mean(scen.map((g) => (new Set(g.map((r) => r.signature)).size === 1 ? 1 : 0))),
+    repRateMean: mean(perRepRate), repRateSd: sd(perRepRate), perRepRate,
+    neurons: mean(rs.map((r) => r.neurons ?? 0)), usdPerRun: mean(rs.map((r) => r.usd ?? 0)), calls: mean(rs.map((r) => r.modelCalls ?? 0)), medianSec: median(rs.map((r) => (r.ms ?? 0) / 1000)),
+    totalUsd: rs.reduce((n, r) => n + (r.usd ?? 0), 0),
+  };
+}
+
+const table = {};
+for (const g of groups) { const [approach, model] = g.split('|'); table[g] = { approach, model, ...summarize(runs.filter((r) => `${r.approach}|${r.model}` === g)) }; }
+
+// per scenario: passes out of reps, per group
+const perScenario = scenarioIds.map((id) => ({ id, name: SCENARIOS.find((s) => s.id === id)?.name, split: SCENARIOS.find((s) => s.id === id)?.split, cells: Object.fromEntries(groups.map((g) => { const rs = runs.filter((r) => r.scenario === id && `${r.approach}|${r.model}` === g); return [g, { pass: rs.filter((r) => r.satisfied).length, n: rs.length, kinds: rs.map((r) => r.kind).join(',') }]; })) }));
+
+// paired: for each model, scenario by scenario, does the agent pass more repetitions than the one-call baseline?
+const paired = {};
+for (const model of [...new Set(runs.map((r) => r.model))]) {
+  const a = `agent|${model}`; const b = `baseline|${model}`;
+  if (!groups.includes(a) || !groups.includes(b)) continue;
+  let win = 0; let lose = 0; let tie = 0;
+  for (const s of perScenario) { const d = s.cells[a].pass - s.cells[b].pass; if (d > 0) win++; else if (d < 0) lose++; else tie++; }
+  paired[model] = { agentBetter: win, baselineBetter: lose, same: tie };
+}
+
+const out = { generatedAt: new Date().toISOString(), tags, split: args.split ?? 'all', table, paired, perScenario };
+const dir = path.join(root, args.name);
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, 'report.json'), JSON.stringify(out, null, 1));
+
+const label = (g) => `${table[g].approach === 'agent' ? 'agent loop' : 'one call'} / ${table[g].model}`;
+const lines = [];
+lines.push(`# Evaluation report: ${args.name}`, '', `Generated by \`eval/report.mjs\` from the raw records of: ${tags.join(', ')}${args.split ? ` (split: ${args.split})` : ''}. Every number below is computed from those records.`, '');
+lines.push('## Totals', '', '| approach / model | runs | constraints met | every repetition met | ideal decision | refunded without need | human approvals needed (unnecessary) | operator loss without a yes | no decision / error | scenarios that flip between runs | same outcome every run | pass rate per repetition (mean ± sd) | model calls | neurons | median seconds |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+for (const g of groups) { const t = table[g]; lines.push(`| ${label(g)} | ${t.runs} | ${pct(t.satisfied)} | ${pct(t.allRepsSatisfied)} | ${pct(t.ideal)} | ${usd(t.unnecessaryRefundCents)} | ${t.humanApprovals} (${t.unnecessaryHuman}) | ${usd(t.lossCents)} in ${t.lossRuns} run(s) | ${t.stopped} | ${pct(t.flip)} | ${pct(t.sameOutcome)} | ${pct(t.repRateMean)} ± ${(100 * t.repRateSd).toFixed(1)} | ${t.calls.toFixed(1)} | ${t.neurons.toFixed(0)} | ${t.medianSec.toFixed(0)} |`); }
+lines.push('', `Spend of the runs in this report: $${Object.values(table).reduce((n, t) => n + t.totalUsd, 0).toFixed(3)} (gross, before the 10,000 free neurons a day).`, '');
+if (Object.keys(paired).length) {
+  lines.push('## Agent loop against one call, scenario by scenario', '', '| model | scenarios where the agent loop met the constraints more often | where the one call did | same |', '|---|---|---|---|');
+  for (const [m, p] of Object.entries(paired)) lines.push(`| ${m} | ${p.agentBetter} | ${p.baselineBetter} | ${p.same} |`);
+  lines.push('');
+}
+lines.push('## Per scenario (constraints met / runs)', '', `| scenario | ${groups.map(label).join(' | ')} |`, `|---|${groups.map(() => '---').join('|')}|`);
+for (const s of perScenario) lines.push(`| ${s.id} ${s.name} (${s.split}) | ${groups.map((g) => `${s.cells[g].pass}/${s.cells[g].n} (${s.cells[g].kinds})`).join(' | ')} |`);
+lines.push('');
+fs.writeFileSync(path.join(dir, 'report.md'), lines.join('\n'));
+console.log(lines.join('\n'));

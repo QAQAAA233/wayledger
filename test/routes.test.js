@@ -186,3 +186,16 @@ test('the refresh route re-derives an expired proposal without calling the model
   assert.ok(again.body.proposal.expiresAt > t);
   assert.equal(script.calls, 1, 'only the original planning call used the model');
 });
+
+test('a trip saved by an earlier version opens read-only with the new parts empty, instead of failing', async () => {
+  const { env, storageOf } = setup();
+  const made = await plan(env);
+  const { id } = made.body;
+  const old = storageOf(id).mem.get('state');
+  for (const k of ['documents', 'policies', 'webhooks', 'runs', 'mandate', 'mandateDraft', 'holdFrom', 'ownerTokenHash']) delete old[k];
+  const seen = await call(env, 'GET', `/api/trips/${id}`);
+  assert.equal(seen.status, 200);
+  assert.deepEqual([seen.body.documents, seen.body.policies, seen.body.runs, seen.body.mandate, seen.body.owner], [[], [], [], null, false]);
+  const tryIt = await call(env, 'POST', `/api/trips/${id}/close`, {}, { 'x-owner-token': made.body.ownerToken });
+  assert.equal(tryIt.status, 403, 'nobody owns it any more, so nothing can be done to it');
+});

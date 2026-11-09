@@ -5,7 +5,7 @@ import { createAgentRunner } from './agent/runner.js';
 import { createSources } from './agent/sources.js';
 import { createToolkit } from './agent/toolkit.js';
 import { spendGuard } from './spend.js';
-import { UserFacingError } from './engine.js';
+import { UserFacingError, upgradeState } from './engine.js';
 
 const errData = (e) => ({ name: e.constructor.name, message: e.message, code: e.code, debugId: e.debugId, issue: e.issue });
 
@@ -13,7 +13,9 @@ const errData = (e) => ({ name: e.constructor.name, message: e.message, code: e.
 // State-changing calls run one at a time. The agent runs in the object's alarm, so a request never waits for it and
 // the screen follows it by reading the run's record. `deps` replaces the edges in tests (PayPal, the models, the
 // forecast and place sources, the AI budget, the clock).
-export function createTripObject({ storage, env, deps = {} }) {
+export function createTripObject({ storage: raw, env, deps = {} }) {
+  // every read of the trip's state goes through the upgrade, so no part of the app meets an older shape
+  const storage = { get: async (k) => (k === 'state' ? upgradeState(await raw.get(k)) : raw.get(k)), put: (k, v) => raw.put(k, v), delete: (k) => raw.delete(k), setAlarm: (t) => raw.setAlarm(t) };
   const spend = deps.spend ?? spendGuard(env, deps.now);
   const paypal = deps.paypal ?? createPayPal({ clientId: env.PAYPAL_CLIENT_ID, secret: env.PAYPAL_CLIENT_SECRET, base: env.PAYPAL_BASE ?? 'https://api-m.sandbox.paypal.com' });
   const runner = createTripRunner({ storage, paypal, ai: deps.ai ?? createAI(env, { spend }), now: deps.now, ttlMs: deps.ttlMs });

@@ -22,6 +22,7 @@ async function withApp(opts, fn, view) {
   const page = await newPage(chrome.browser, view);
   try {
     await page.goto(app.url);
+    await page.waitForSelector('#prompt'); // the page draws itself after it has asked the server for its settings
     await fn(page, app);
   } finally {
     await page.close();

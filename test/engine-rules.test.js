@@ -290,7 +290,8 @@ test('simulating a cancellation reports what the person would lose to the operat
   const before = Date.parse('2026-05-01T09:00:00Z');
   assert.deepEqual([sim(boat, before).lossCents, sim(boat, before).why], [0, 'free to cancel until 2026-05-06 12:00']);
   assert.equal(sim(sintra, before).lossCents, 12000);
-  assert.equal(sim(boat, Date.parse('2026-05-07T09:00:00Z')).lossCents, null, 'after the date the terms say nothing more, so the loss is not guessed');
+  const late = sim(boat, Date.parse('2026-05-07T09:00:00Z'));
+  assert.deepEqual([late.lossCents, late.assumed], [18000, true], 'after the date the terms say nothing more, so the worst case is assumed: the whole price');
   const none = setup();
   await booked(none);
   assert.equal(none.engine.simulate(state(none), [{ op: 'remove', itemId: itemId(none, 'boat') }]).losses[0].lossCents, null);
@@ -346,4 +347,66 @@ test('a diff never splits one item two ways: adding priced items to a booked tri
   const next = applyChange(plan, { operations: [{ op: 'add', item: { day: 2, title: 'Dinner', category: 'food', amount: 60, participants: ['Ana'] } }] });
   assert.deepEqual(diffToActions(plan, next, []).map((a) => [a.type, a.cents]), [['hold', 6000]]);
   void ctx;
+});
+
+// ---- reading the terms: what code insists on before anything is cancelled -----------------------------------------------
+
+const LIMITS = (ctx) => ({ enabled: true, refundCapCents: 100000, planIncreaseCapCents: 0, validUntil: ctx.clock.t + 5 * 24 * HOUR });
+const BOAT_SENTENCE = 'Sunset boat tour: free cancellation until 6 May 12:00, after that non-refundable.';
+
+test('a rule that contradicts its own sentence is refused; "non-refundable after that" is written as 100 percent after the date', async () => {
+  const ctx = setup();
+  ctx.clock.t = Date.parse('2026-05-01T09:00:00Z');
+  await booked(ctx);
+  await ctx.engine.addDocument(TERMS);
+  const boat = itemId(ctx, 'boat');
+  await assert.rejects(ctx.engine.recordPolicy({ docId: 'd1', itemId: boat, quote: BOAT_SENTENCE, nonRefundable: true }), /names a date/);
+  await assert.rejects(ctx.engine.recordPolicy({ docId: 'd1', itemId: boat, quote: BOAT_SENTENCE, nonRefundable: true, freeCancelUntil: '2026-05-06T12:00' }), /never be cancelled for free/);
+  await assert.rejects(ctx.engine.recordPolicy({ docId: 'd1', itemId: boat, quote: BOAT_SENTENCE, freeCancelUntil: '2026-05-06T12:00', penaltyPercent: 40 }), /not in your quote/);
+  const ok = await ctx.engine.recordPolicy({ docId: 'd1', itemId: boat, quote: BOAT_SENTENCE, freeCancelUntil: '2026-05-06T12:00', penaltyPercent: 100 });
+  assert.equal(ok.penaltyPercent, 100);
+  const sim = (at) => { ctx.clock.t = at; return ctx.engine.simulate(state(ctx), [{ op: 'remove', itemId: boat }]).losses[0]; };
+  assert.equal(sim(Date.parse('2026-05-02T09:00:00Z')).lossCents, 0);
+  assert.equal(sim(Date.parse('2026-05-07T09:00:00Z')).lossCents, 18000, 'after the date the whole price is lost');
+});
+
+test('pasted terms must be read before anything is cancelled; "the terms do not mention it" cannot be claimed for something they mention', async () => {
+  const ctx = setup();
+  ctx.clock.t = Date.parse('2026-05-01T09:00:00Z');
+  await booked(ctx, LIMITS(ctx));
+  await ctx.engine.addDocument(TERMS);
+  const boat = itemId(ctx, 'boat'); const apartment = itemId(ctx, 'apartment');
+  const before = ctx.fake.calls.length;
+  await assert.rejects(ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: boat }] }), (e) => e.code === 'TERMS_UNREAD' && /read_documents/.test(e.message));
+  assert.equal(state(ctx).plan.items.some((i) => i.id === boat), true, 'nothing changed');
+  assert.equal(ctx.fake.calls.length, before, 'and PayPal was not called');
+
+  await assert.rejects(ctx.engine.recordPolicy({ itemId: boat, none: true }), /do mention/);
+  const none = await ctx.engine.recordPolicy({ itemId: apartment, none: true });
+  assert.equal(none.none, true);
+  const sim = ctx.engine.simulate(state(ctx), [{ op: 'remove', itemId: apartment }]);
+  assert.deepEqual([sim.losses[0].lossCents, sim.losses[0].unchecked], [null, false], 'unknown, but looked at');
+  const out = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: apartment }] });
+  assert.ok(['proposed', 'executed'].includes(out.outcome));
+});
+
+test('cancelling something the terms make non-refundable always needs the person, and the proposal says what it costs and quotes the sentence', async () => {
+  const ctx = setup();
+  ctx.clock.t = Date.parse('2026-05-01T09:00:00Z');
+  await booked(ctx, LIMITS(ctx));
+  await ctx.engine.addDocument(TERMS);
+  const sintra = itemId(ctx, 'Sintra'); const boat = itemId(ctx, 'boat');
+  const sentence = 'Sintra day trip: non-refundable from the moment of booking.';
+  await ctx.engine.recordPolicy({ docId: 'd1', itemId: sintra, quote: sentence, nonRefundable: true });
+  await ctx.engine.recordPolicy({ docId: 'd1', itemId: boat, quote: BOAT_SENTENCE, freeCancelUntil: '2026-05-06T12:00', penaltyPercent: 100 });
+
+  const costly = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: sintra }] });
+  assert.equal(costly.outcome, 'proposed', 'it would run inside the money limits, but it costs the person $120 at the operator');
+  assert.deepEqual(costly.mandate.reasons.map((r) => r.code), ['LOSS_TO_OPERATOR']);
+  assert.deepEqual(active(ctx).operatorLoss, [{ title: 'Sintra day trip', lossCents: 12000, why: 'the terms say it is non-refundable', quote: sentence }]);
+  assert.equal(state(ctx).plan.items.some((i) => i.id === sintra), true, 'nothing happened yet');
+  assert.equal(ctx.engine.view(state(ctx)).proposal.operatorLoss[0].quote, sentence, 'the screen gets the sentence');
+
+  const free = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: boat }] });
+  assert.equal(free.outcome, 'executed', 'free to cancel and inside the limits: the agent goes ahead on its own');
 });

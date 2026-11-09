@@ -18,11 +18,12 @@ const canonical = (p) => JSON.stringify({
   ...(p.unfunded ? { unfunded: p.unfunded } : {}),
   ...(p.mandateTerms ? { mandateTerms: p.mandateTerms } : {}),
   ...(p.humanOnly ? { humanOnly: p.humanOnly } : {}),
+  ...(p.operatorLoss ? { operatorLoss: p.operatorLoss } : {}),
 });
 
 // `summary` is written by code from the actions. `agentNote` is what the model said; it is shown apart, labelled,
 // and is not part of what anyone confirms.
-export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, agentNote, source, now, ttlMs = PROPOSAL_TTL_MS }) {
+export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, agentNote, source, now, ttlMs = PROPOSAL_TTL_MS }) {
   if (actions.length === 0) throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
   const proposal = {
     id, tripId, kind, summary,
@@ -31,6 +32,7 @@ export async function createProposal({ id, tripId, kind, summary, actions, newPl
     ...(unfunded ? { unfunded } : {}),
     ...(mandateTerms ? { mandateTerms } : {}),
     ...(humanOnly ? { humanOnly } : {}),
+    ...(operatorLoss ? { operatorLoss } : {}),
     ...(agentNote ? { agentNote } : {}),
     ...(source ? { source } : {}),
     capCents: actions.reduce((a, x) => a + x.cents, 0),

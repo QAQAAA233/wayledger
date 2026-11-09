@@ -22,7 +22,7 @@ export const boatOf = (messages) => facts(messages).items.find((i) => /boat/i.te
 
 // get_trip -> get_forecast -> read_documents -> record_policy -> search_places -> simulate_edit -> submit_edit.
 export function stormSteps({ sameOps = true, quote = BOAT_QUOTE, until = '2026-05-06T12:00' } = {}) {
-  const ops = (messages) => { const boat = boatOf(messages); return [{ op: 'remove', itemId: boat.id }, { op: 'add', item: { day: boat.day, placeId: found(messages)[0].placeId, category: 'activity', amount: boat.priceUsd, amountBasis: 'same_as_replaced' } }]; };
+  const edit = (messages) => { const boat = boatOf(messages); return { remove: [boat.id], add: [{ placeId: found(messages)[0].placeId, day: boat.day, category: 'activity', amountBasis: 'same_as_replaced', replaces: boat.id }] }; };
   const summary = { summary: 'I swapped the boat tour for a museum visit because of the storm.', reason: 'The boat tour is free to cancel until the cut-off and the museum is indoors.' };
   return [
     { calls: [T('get_trip')] },
@@ -30,20 +30,20 @@ export function stormSteps({ sameOps = true, quote = BOAT_QUOTE, until = '2026-0
     { calls: [T('read_documents')] },
     ({ messages }) => ({ calls: [T('record_policy', { docId: allResults(messages).find((r) => Array.isArray(r.documents)).documents[0].docId, itemId: boatOf(messages).id, quote, freeCancelUntil: until })] }),
     { calls: [T('search_places', { kind: 'museum' })] },
-    ({ messages }) => ({ calls: [T('simulate_edit', { operations: ops(messages) })] }),
+    ({ messages }) => ({ calls: [T('simulate_edit', edit(messages))] }),
     ({ messages }) => {
       const simulated = [...messages].reverse().find((m) => m.role === 'assistant' && m.tool_calls?.some((c) => c.function.name === 'simulate_edit'));
-      return { calls: [T('submit_edit', { operations: JSON.parse(simulated.tool_calls.find((c) => c.function.name === 'simulate_edit').function.arguments).operations, ...summary })] };
+      return { calls: [T('submit_edit', { ...JSON.parse(simulated.tool_calls.find((c) => c.function.name === 'simulate_edit').function.arguments), ...summary })] };
     },
   ].slice(0, sameOps ? 7 : 6);
 }
 
 // get_trip -> simulate_edit -> submit_edit: drop one item. Used where only the way the answer reaches the screen matters.
 export function dropSteps(re = /apartment/i) {
-  const ops = (messages) => [{ op: 'remove', itemId: facts(messages).items.find((i) => re.test(i.title)).id }];
+  const edit = (messages) => ({ remove: [facts(messages).items.find((i) => re.test(i.title)).id] });
   return [
     { calls: [T('get_trip')] },
-    ({ messages }) => ({ calls: [T('simulate_edit', { operations: ops(messages) })] }),
-    ({ messages }) => ({ calls: [T('submit_edit', { operations: ops(messages), summary: 'Dropped it.', reason: 'You found a free place.' })] }),
+    ({ messages }) => ({ calls: [T('simulate_edit', edit(messages))] }),
+    ({ messages }) => ({ calls: [T('submit_edit', { ...edit(messages), summary: 'Dropped it.', reason: 'You found a free place.' })] }),
   ];
 }

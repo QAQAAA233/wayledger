@@ -15,6 +15,14 @@ export class UserFacingError extends Error {
 }
 
 const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+
+// A trip saved by an earlier version of the app has no documents, rules, runs or limits yet: it opens as it was, read-only,
+// with those fields empty instead of failing.
+export function upgradeState(s) {
+  if (!s) return s;
+  s.documents ??= []; s.policies ??= []; s.webhooks ??= []; s.runs ??= []; s.mandate ??= null; s.mandateDraft ??= null; s.holdFrom ??= null; s.ownerTokenHash ??= null;
+  return s;
+}
 const DAY_MS = 86_400_000;
 // PayPal keeps a hold for 29 days. A hold is placed no earlier than this many days before the trip's last day, so it
 // is still alive when the trip closes.
@@ -212,13 +220,14 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     const humanOnly = ops.some((o) => HUMAN_ONLY_OPS.includes(o.op));
     const booked = s.ledger.length > 0;
     const actions = booked ? diffToActions(s.plan, newPlan, s.ledger) : [];
-    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now() });
-    const effect = paypalEffect(actions);
     const losses = [];
     const lose = (item, newAmountCents) => {
       const fact = s.policies.find((f) => f.itemId === item.id);
       const l = operatorLoss(item, fact, now());
-      losses.push({ itemId: item.id, title: item.title, ...l, quote: fact?.quote ?? null, appliesTo: newAmountCents == null ? 'cancelling it' : 'lowering it' });
+      const dropCents = newAmountCents == null ? item.amountCents : item.amountCents - newAmountCents;
+      // what the operator keeps is the part of the drop the terms do not return
+      const lossCents = l.lossCents == null ? null : Math.min(dropCents, newAmountCents == null ? l.lossCents : Math.round((l.lossCents * dropCents) / item.amountCents));
+      losses.push({ itemId: item.id, title: item.title, ...l, lossCents, quote: fact?.quote ?? null, appliesTo: newAmountCents == null ? 'cancelling it' : 'lowering it', unchecked: !fact && s.documents.length > 0 });
     };
     const newById = new Map(newPlan.items.map((i) => [i.id, i]));
     for (const it of s.plan.items) {
@@ -226,6 +235,9 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (!n) lose(it, null);
       else if (n.amountCents < it.amountCents) lose(it, n.amountCents);
     }
+    const operatorLossCents = losses.reduce((n, l) => n + (l.lossCents ?? 0), 0);
+    const evaluation = evaluateMandate(s.mandate, { actions, humanOnly, planAfterTotalCents: planTotalCents(newPlan), now: now(), operatorLossCents });
+    const effect = paypalEffect(actions);
     const holds = reserves(s.ledger).filter((r) => r.open);
     const expiring = holds.filter((r) => r.expiresAt).map((r) => r.expiresAt).sort()[0] ?? null;
     const endsOn = tripEndDate(newPlan);
@@ -358,15 +370,19 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (ops.some((o) => HUMAN_ONLY_OPS.includes(o.op))) throw new UserFacingError('Only you can change your budget. Ask the traveler instead.', 'BUDGET_IS_YOURS');
       const sim = simulate(s, ops);
       if (!sim.ok) throw new UserFacingError(sim.error, 'PLAN');
+      // The traveler's own pasted terms must have been read before anything is cancelled or lowered.
+      const unread = sim.losses.filter((l) => l.unchecked).map((l) => l.title);
+      if (unread.length) throw new UserFacingError(`The traveler pasted booking terms, but nothing is recorded about ${unread.join(', ')}. Read them with read_documents and record what they say with record_policy (none: true if no sentence mentions the item), then submit again.`, 'TERMS_UNREAD');
       const source = { type: 'agent', runId };
+      const lossLines = sim.losses.filter((l) => l.lossCents > 0).map((l) => ({ title: l.title, lossCents: l.lossCents, why: l.why, quote: l.quote }));
       if (agentNote) log(s, 'agent', String(agentNote).slice(0, 400));
+      const summary = proposalSummary('change', s.plan, sim.newPlan);
       if (!sim.booked) {
         s.plan = sim.newPlan;
         await refreshCheckout(s);
         await store.put(s);
-        return { outcome: 'updated', money: false, summary: proposalSummary('change', null, null) };
+        return { outcome: 'updated', money: false, summary };
       }
-      const summary = proposalSummary('change', s.plan, sim.newPlan);
       if (sim.actions.length === 0) {
         s.plan = sim.newPlan;
         s.activeProposal = null;
@@ -374,7 +390,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         await store.put(s);
         return { outcome: 'updated', money: false, summary };
       }
-      const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source });
+      const p = await fresh(s, 'change', summary, sim.actions, sim.newPlan, { agentNote: agentNote ? String(agentNote).slice(0, 400) : undefined, source, ...(lossLines.length ? { operatorLoss: lossLines } : {}) });
       if (sim.mandate.within) {
         await confirmByMandate(p, s.mandate, sim.mandate, now());
         log(s, 'system', `Inside the limits you signed, so the agent went ahead: ${summary}`);

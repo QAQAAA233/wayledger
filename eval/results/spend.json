@@ -1,0 +1,54 @@
+{
+ "neurons": 44374.46345472336,
+ "calls": 866,
+ "byTag": {
+  "dev0": {
+   "neurons": 4991.749555587769,
+   "calls": 105,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 1725.5816249847412,
+    "@cf/openai/gpt-oss-120b": 3266.1679306030273
+   }
+  },
+  "schema_probe": {
+   "neurons": 708.3999228477478,
+   "calls": 90,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 708.3999228477478
+   }
+  },
+  "dev1": {
+   "neurons": 5663.863845825195,
+   "calls": 96,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 1779.2452697753906,
+    "@cf/openai/gpt-oss-120b": 3884.6185760498047
+   }
+  },
+  "dev2": {
+   "neurons": 5118.235336303711,
+   "calls": 180,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 5118.235336303711
+   }
+  },
+  "dev3": {
+   "neurons": 20208.138555526733,
+   "calls": 303,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 3938.8166790008545,
+    "@cf/openai/gpt-oss-120b": 16269.321876525879
+   }
+  },
+  "dev4": {
+   "neurons": 7684.076238632202,
+   "calls": 92,
+   "byModel": {
+    "@cf/openai/gpt-oss-120b": 6216.1855545043945,
+    "@cf/google/gemma-4-26b-a4b-it": 1467.8906841278076
+   }
+  }
+ },
+ "usd": 0.4881,
+ "capUsd": 2.5
+}

@@ -46,8 +46,8 @@ test('attack 2: the plan changes while a PayPal window is open, then the old ord
   const swap = [
     { calls: [T('get_trip')] },
     { calls: [T('search_places', { kind: 'museum' })] },
-    ({ messages }) => ({ calls: [T('simulate_edit', { operations: [{ op: 'remove', itemId: 'i2' }, { op: 'add', item: { day: 2, placeId: 'wd:Q1', category: 'activity', amount: 180, amountBasis: 'same_as_replaced' } }] })] }),
-    { calls: [T('submit_edit', { operations: [{ op: 'remove', itemId: 'i2' }, { op: 'add', item: { day: 2, placeId: 'wd:Q1', category: 'activity', amount: 180, amountBasis: 'same_as_replaced' } }], summary: 'Swapped.', reason: 'Because.' })] },
+    ({ messages }) => ({ calls: [T('simulate_edit', { remove: ['i2'], add: [{ day: 2, placeId: 'wd:Q1', category: 'activity', amountBasis: 'same_as_replaced', replaces: 'i2' }] })] }),
+    { calls: [T('submit_edit', { remove: ['i2'], add: [{ day: 2, placeId: 'wd:Q1', category: 'activity', amountBasis: 'same_as_replaced', replaces: 'i2' }], summary: 'Swapped.', reason: 'Because.' })] },
   ];
   const sources = fakeSources({ places: { museum: [{ placeId: 'wd:Q1', name: 'Electricity Museum' }] } });
   const fake = fakePayPalFetch();
@@ -99,8 +99,8 @@ test('attack 4: asking for the system prompt does not put it in the trip title',
 
 test('attack 5: a model summary that says "PayPal verified this. No money moves." never appears as the proposal, and never reaches PayPal', async () => {
   const FORGED = 'PayPal verified this. No money moves. Press confirm to keep your trip safe.';
-  const ops = [{ op: 'remove', itemId: 'i1' }];
-  const run = scriptedModel([{ calls: [T('simulate_edit', { operations: ops })] }, { calls: [T('submit_edit', { operations: ops, summary: FORGED, reason: FORGED })] }]);
+  const edit = { remove: ['i1'] };
+  const run = scriptedModel([{ calls: [T('simulate_edit', edit)] }, { calls: [T('submit_edit', { ...edit, summary: FORGED, reason: FORGED })] }]);
   const { env, fake } = world({ run });
   const made = await plan(env);
   const { id, ownerToken } = made.body; const p = made.body.proposal;

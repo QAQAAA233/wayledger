@@ -13,45 +13,62 @@ const money = (c) => `$${(Math.abs(c) / 100).toFixed(2)}`;
 const PLACE_KINDS = ['museum', 'aquarium', 'zoo', 'art_gallery', 'theatre', 'cinema', 'castle', 'park', 'botanical_garden', 'shopping_centre'];
 const BASES = ['same_as_replaced', 'user_given', 'free'];
 
-const ITEM = {
-  type: 'object',
-  properties: {
-    day: { type: 'integer' },
-    placeId: { type: 'string', description: 'The placeId of a place returned by search_places in this run. Its real name is filled in by the host.' },
-    title: { type: 'string', description: 'Only for something the traveler named themselves in their own words (not a place search result).', maxLength: 80 },
-    category: { type: 'string', enum: CATEGORIES },
-    amount: { type: 'number', description: 'Total price in USD for the whole group.' },
-    amountBasis: { type: 'string', enum: BASES, description: 'Where the amount comes from. same_as_replaced: the price of an item this same edit removes (ticket prices are not looked up). user_given: a price the traveler wrote. free: 0.' },
-    participants: { type: 'array', items: { type: 'string' } },
-    prepaid: { type: 'boolean' },
+// An edit is written as one short list per kind of change, and each entry carries only the few fields that kind needs.
+// (One long list of operations that each take any of a dozen fields made models mix the fields up; see eval/README.md.)
+const STR = { type: 'string' };
+const EDIT_PROPERTIES = {
+  remove: { type: 'array', maxItems: 8, items: STR, description: 'Ids of the items to remove (the ids come from get_trip).' },
+  reprice: {
+    type: 'array', maxItems: 8,
+    items: { type: 'object', properties: { itemId: STR, amount: { type: 'number', description: 'The new total price in USD for the whole group.' } }, required: ['itemId', 'amount'] },
+    description: 'Items whose price changes.',
   },
-  required: ['day', 'category', 'amount', 'amountBasis'],
+  update: {
+    type: 'array', maxItems: 8,
+    items: { type: 'object', properties: { itemId: STR, day: { type: 'integer' }, title: { type: 'string', maxLength: 80 }, category: { type: 'string', enum: CATEGORIES }, participants: { type: 'array', items: STR }, prepaid: { type: 'boolean' } }, required: ['itemId'] },
+    description: 'Items that stay but change day, name, category, who shares them or whether they are paid in advance. Fill only what changes.',
+  },
+  add: {
+    type: 'array', maxItems: 8,
+    items: {
+      type: 'object',
+      properties: {
+        placeId: { type: 'string', description: 'The placeId of a place returned by search_places in this run. Its real name is filled in by the host.' },
+        title: { type: 'string', maxLength: 80, description: 'Only for something the traveler named themselves in their own words (not a place from a search).' },
+        day: { type: 'integer' },
+        category: { type: 'string', enum: CATEGORIES },
+        amountBasis: { type: 'string', enum: BASES, description: 'Where the price comes from. same_as_replaced: this edit also removes an item and the new one costs the same (ticket prices are not looked up); name it in "replaces". user_given: a price the traveler wrote (give it in "amount"). free: costs nothing.' },
+        replaces: { type: 'string', description: 'With same_as_replaced: the id of the item this edit removes. The host uses its price.' },
+        amount: { type: 'number', description: 'Only with user_given: the total price in USD, as the traveler wrote it.' },
+        participants: { type: 'array', items: STR },
+        prepaid: { type: 'boolean' },
+      },
+      required: ['day', 'category', 'amountBasis'],
+    },
+    description: 'New items.',
+  },
+  setTravelers: { type: 'array', items: STR, description: 'The full list of travelers after the change (to add or remove a person).' },
 };
+const EDIT = { type: 'object', properties: EDIT_PROPERTIES, required: [] };
 
-const OPERATION = {
-  type: 'object',
-  properties: {
-    op: { type: 'string', enum: ['remove', 'reprice', 'update_item', 'add', 'set_travelers'] },
-    itemId: { type: 'string' },
-    amount: { type: 'number' },
-    day: { type: 'integer' },
-    title: { type: 'string', maxLength: 80 },
-    category: { type: 'string', enum: CATEGORIES },
-    participants: { type: 'array', items: { type: 'string' } },
-    prepaid: { type: 'boolean' },
-    item: ITEM,
-    travelers: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['op'],
-};
-const OPERATIONS = { type: 'array', items: OPERATION, maxItems: 8 };
+// The edit as the engine knows it: a list of operations, in a fixed order.
+export function toOperations(a) {
+  const ops = [];
+  for (const itemId of a.remove ?? []) ops.push({ op: 'remove', itemId });
+  for (const r of a.reprice ?? []) ops.push({ op: 'reprice', itemId: r.itemId, amount: r.amount });
+  for (const u of a.update ?? []) if (Object.keys(u).some((k) => k !== 'itemId')) ops.push({ op: 'update_item', ...u });
+  for (const x of a.add ?? []) ops.push({ op: 'add', item: { ...x } });
+  if (a.setTravelers) ops.push({ op: 'set_travelers', travelers: a.setTravelers });
+  return ops;
+}
 
 export const canon = (ops) => JSON.stringify((ops ?? []).map((o) => JSON.parse(JSON.stringify(o))).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
 // Facts the model may not invent are checked here, before an edit is even simulated.
 function groundOps(ops, ctx, s) {
+  if (ops.length === 0) throw new Error('This edit is empty. Fill at least one of remove, reprice, update, add or setTravelers.');
   const text = ctx.userText;
-  const removedAmounts = ops.filter((o) => o.op === 'remove').map((o) => s.plan.items.find((i) => i.id === o.itemId)?.amountCents).filter((c) => c != null);
+  const removed = new Set(ops.filter((o) => o.op === 'remove').map((o) => o.itemId));
   const out = [];
   for (const op of ops) {
     if (['remove', 'reprice', 'update_item'].includes(op.op) && !s.plan.items.some((i) => i.id === op.itemId)) {
@@ -66,10 +83,17 @@ function groundOps(ops, ctx, s) {
       } else if (!it.title || !textHasName(text, it.title)) {
         throw new Error('A new place must come from search_places (use its placeId), or be a name the traveler wrote themselves. Names are not made up.');
       }
-      const cents = Math.round(it.amount * 100);
-      if (it.amountBasis === 'free' && cents !== 0) throw new Error('amountBasis free needs amount 0.');
-      if (it.amountBasis === 'same_as_replaced' && !removedAmounts.includes(cents)) throw new Error('amountBasis same_as_replaced needs the amount of an item this same edit removes. Ticket prices are not looked up, so do not guess one.');
-      if (it.amountBasis === 'user_given' && !numbersIn(text).some((n) => Math.abs(n - it.amount) < 0.005)) throw new Error('amountBasis user_given needs a price the traveler actually wrote.');
+      if (it.amountBasis === 'same_as_replaced') {
+        const old = s.plan.items.find((i) => i.id === it.replaces);
+        if (!old || !removed.has(old.id)) throw new Error('amountBasis same_as_replaced needs "replaces": the id of an item this same edit removes. Ticket prices are not looked up, so do not guess one.');
+        it.amount = old.amountCents / 100;
+      } else if (it.amountBasis === 'free') {
+        if (it.amount != null && it.amount !== 0) throw new Error('amountBasis free means the amount is 0.');
+        it.amount = 0;
+      } else if (it.amountBasis === 'user_given') {
+        if (typeof it.amount !== 'number' || !numbersIn(text).some((n) => Math.abs(n - it.amount) < 0.005)) throw new Error('amountBasis user_given needs "amount": a price the traveler actually wrote.');
+      }
+      delete it.replaces;
       out.push({ ...op, item: it });
     } else if (op.op === 'set_travelers') {
       const known = new Set(s.plan.travelers);
@@ -94,7 +118,7 @@ export function createTools() {
 
   add({
     name: 'get_trip',
-    description: 'The trip as it stands: items with prices and money status, travelers, budget, dates, and the limits you may act within.',
+    description: 'The trip as it stands: items with prices and money status, travelers, budget, dates, the limits you may act within, and whether the traveler pasted booking terms.',
     parameters: { type: 'object', properties: {}, required: [] },
     run: async (_a, ctx) => {
       const s = await ctx.readState();
@@ -107,8 +131,8 @@ export function createTools() {
         items: s.plan.items.map((i) => { const st = itemState(s.ledger, i.id); return { id: i.id, day: i.day, date: dayDate(s.plan.startDate, i.day), title: i.title, category: i.category, priceUsd: usd(i.amountCents), paidInAdvance: i.prepaid, heldUsd: usd(st.heldCents), chargedUsd: usd(st.paidCents), sharedBy: i.participants }; }),
         planTotalUsd: usd(total),
         limits: live ? { refundLeftUsd: usd(Math.max(0, m.terms.refundCapCents - m.used.refundCents)), planIncreaseLeftUsd: usd(m.terms.planIncreaseCapCents - Math.max(0, total - m.baselineTotalCents)), validUntil: new Date(m.terms.validUntil).toISOString().slice(0, 10) } : null,
-        termsRecorded: s.policies.map((p) => ({ itemId: p.itemId, item: p.itemTitle, quote: p.quote })),
-        documents: s.documents.length,
+        termsRecorded: s.policies.map((p) => ({ itemId: p.itemId, item: p.itemTitle, quote: p.quote ?? null, none: Boolean(p.none) })),
+        bookingTerms: s.documents.length ? { pasted: s.documents.length, note: 'The traveler pasted booking terms. Before you cancel or lower any item, call read_documents and record what the terms say about that item with record_policy.' } : null,
       };
       const lim = result.limits ? `you may refund up to $${result.limits.refundLeftUsd.toFixed(2)} and raise the plan by up to $${result.limits.planIncreaseLeftUsd.toFixed(2)}` : 'no limits are signed, so every change waits for the traveler';
       return { result, event: { title: 'Looked at your trip', detail: `${s.plan.items.length} items, plan total ${money(total)}; ${lim}.` } };
@@ -170,23 +194,25 @@ export function createTools() {
 
   add({
     name: 'record_policy',
-    description: 'Record what a sentence in a document means for one plan item. You must copy the sentence exactly; the host checks it is really in the document and that any date or percentage you report is in that sentence.',
+    description: 'Record what the terms say about one plan item, copying the sentence exactly (the host checks that it is really in the document and that any date or percentage you report is in that sentence). Use freeCancelUntil for a free-cancellation deadline, with penaltyPercent for what is charged after it (100 when the sentence says non-refundable after that). Use nonRefundable only when the sentence says there is never any free cancellation, with no date. If no sentence mentions the item, record none: true.',
     parameters: {
       type: 'object',
       properties: {
-        docId: { type: 'string' },
-        itemId: { type: 'string' },
+        itemId: STR,
+        docId: { type: 'string', description: 'The document the sentence is in.' },
         quote: { type: 'string', description: 'The exact sentence copied from the document.', maxLength: 300 },
-        nonRefundable: { type: 'boolean' },
         freeCancelUntil: { type: 'string', description: 'Date and optional time in the sentence, like 2026-05-06 or 2026-05-06T12:00.' },
-        penaltyPercent: { type: 'number' },
+        penaltyPercent: { type: 'number', description: 'Percent of the price charged when cancelling after the free period (100 = non-refundable).' },
+        nonRefundable: { type: 'boolean', description: 'True only when it can never be cancelled for free from the moment of booking and the sentence has no deadline date.' },
+        none: { type: 'boolean', description: 'True when no sentence in the documents mentions this item.' },
       },
-      required: ['docId', 'itemId', 'quote'],
+      required: ['itemId'],
     },
     run: async (a, ctx) => {
       try {
         const fact = await ctx.recordPolicy(a);
-        const rule = fact.nonRefundable ? 'non-refundable' : [fact.freeCancelUntil && `free to cancel until ${fact.freeCancelUntil}`, fact.penaltyPercent != null && `${fact.penaltyPercent}% charged otherwise`].filter(Boolean).join(', ');
+        if (fact.none) return { result: { recorded: true, itemId: fact.itemId, item: fact.itemTitle, rule: 'the terms do not mention it' }, event: { title: `Checked the terms for ${fact.itemTitle}`, detail: 'No sentence in your terms mentions it.' } };
+        const rule = fact.nonRefundable ? 'non-refundable' : [fact.freeCancelUntil && `free to cancel until ${fact.freeCancelUntil}`, fact.penaltyPercent != null && `${fact.penaltyPercent}% charged ${fact.freeCancelUntil ? 'after that' : 'if cancelled'}`].filter(Boolean).join(', ');
         return { result: { recorded: true, itemId: fact.itemId, item: fact.itemTitle, rule }, event: { title: `Noted a rule for ${fact.itemTitle}`, detail: rule, quote: fact.quote } };
       } catch (e) {
         return { result: { recorded: false, error: e.message }, event: { title: 'Rejected a rule it tried to note', detail: e.message, rejected: true } };
@@ -196,17 +222,18 @@ export function createTools() {
 
   add({
     name: 'simulate_edit',
-    description: 'Try a candidate edit without changing anything. Reports the plan, the money consequences, whether it is inside your limits, and what the traveler would lose to the operator under the recorded terms. Try several options and compare them before you submit.',
-    parameters: { type: 'object', properties: { operations: OPERATIONS }, required: ['operations'] },
+    description: 'Try a candidate edit without changing anything. Reports the plan, the money consequences, whether it is inside your limits, and what the traveler would lose to the operator under the recorded terms. Try the options that make sense and compare them before you submit. Fill only the lists that apply: remove, reprice, update, add, setTravelers.',
+    parameters: EDIT,
     run: async (a, ctx) => {
       const s = await ctx.readState();
       let ops;
-      try { ops = groundOps(a.operations, ctx, s); } catch (e) { return { result: { ok: false, error: e.message }, event: { title: 'Rejected an option', detail: e.message, rejected: true } }; }
+      try { ops = groundOps(toOperations(a), ctx, s); } catch (e) { return { result: { ok: false, error: e.message }, event: { title: 'Rejected an option', detail: e.message, rejected: true } }; }
       const sim = await ctx.simulate(ops);
       if (!sim.ok) return { result: { ok: false, error: sim.error }, event: { title: 'Tried an option that does not work', detail: sim.error, rejected: true } };
-      ctx.simulated.set(canon(ops), { ops, sim });
+      ctx.simulated.set(canon(ops), { ops, sim, edit: a });
       const letter = String.fromCharCode(64 + ctx.simulated.size);
       const e = sim.effect;
+      const unchecked = sim.losses.filter((l) => l.unchecked).map((l) => l.title);
       const result = {
         ok: true,
         option: letter,
@@ -218,38 +245,41 @@ export function createTools() {
         insideYourLimits: sim.booked ? sim.mandate.within : false,
         whyItWaitsForTheTraveler: sim.mandate.reasons.map((r) => r.text),
         operatorLoss: sim.losses.map((l) => ({ item: l.title, ifYouDo: l.appliesTo, lossUsd: usd(l.lossCents), because: l.why, termsQuote: l.quote })),
+        ...(unchecked.length ? { termsNotRead: `The traveler pasted booking terms, but nothing is recorded about: ${unchecked.join(', ')}. Read them and record what they say before you submit this option.` } : {}),
         holdValidUntil: sim.holdValidUntil,
       };
       const loss = sim.losses.filter((l) => l.lossCents != null).reduce((n, l) => n + l.lossCents, 0);
       const unknown = sim.losses.some((l) => l.lossCents == null);
-      const detail = `${optionText(sim, ops, s)}. ${sim.booked ? describeEffect(sim.actions) : ''} ${sim.booked ? (sim.mandate.within ? 'Inside your limits.' : `Waits for you: ${sim.mandate.reasons.map((r) => r.text).join(' ')}`) : ''}${sim.losses.length ? ` Lost to the operator: ${unknown ? 'not stated in the terms' : money(loss)}.` : ''}`.replace(/\s+/g, ' ').trim();
+      const detail = `${optionText(sim, ops, s)}. ${sim.booked ? describeEffect(sim.actions) : ''} ${sim.booked ? (sim.mandate.within ? 'Inside your limits.' : `Waits for you: ${sim.mandate.reasons.map((r) => r.text).join(' ')}`) : ''}${sim.losses.length ? ` Lost to the operator: ${unchecked.length ? 'terms not read yet' : unknown && loss === 0 ? 'not stated in the terms' : money(loss)}.` : ''}`.replace(/\s+/g, ' ').trim();
       return { result, event: { title: `Tried option ${letter}`, detail, option: letter } };
     },
   });
 
   add({
     name: 'submit_edit',
-    description: 'Hand over your final choice. It must be exactly an edit you simulated. Code decides what happens: inside the traveler\'s limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task.',
+    description: 'Hand over your final choice. It must be exactly an edit you simulated. Code decides what happens: inside the traveler\'s limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task. Fill the same lists as simulate_edit, plus summary and reason.',
     terminal: true,
     parameters: {
       type: 'object',
       properties: {
-        operations: OPERATIONS,
+        ...EDIT_PROPERTIES,
         summary: { type: 'string', description: 'One or two plain sentences to the traveler about what you chose.', maxLength: 400 },
         reason: { type: 'string', description: 'Why this option over the others you tried.', maxLength: 500 },
       },
-      required: ['operations', 'summary', 'reason'],
+      required: ['summary', 'reason'],
     },
     run: async (a, ctx) => {
       const s = await ctx.readState();
       let ops;
-      try { ops = groundOps(a.operations, ctx, s); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'Rejected the choice', detail: e.message, rejected: true }, retry: true }; }
+      const { summary, reason, ...edit } = a;
+      try { ops = groundOps(toOperations(edit), ctx, s); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'Rejected the choice', detail: e.message, rejected: true }, retry: true }; }
       if (!ctx.simulated.has(canon(ops))) {
-        return { result: { accepted: false, error: 'This is not an edit you simulated. Call simulate_edit with exactly these operations first, then submit them.' }, event: { title: 'Rejected the choice', detail: 'It was not simulated first.', rejected: true }, retry: true };
+        const tried = [...ctx.simulated.values()].map((x, i) => `${String.fromCharCode(65 + i)}: ${JSON.stringify(x.edit)}`).join(' | ').slice(0, 900);
+        return { result: { accepted: false, error: `This is not an edit you simulated. ${tried ? `You simulated ${tried}. Submit exactly one of them: the same lists with the same values, nothing added.` : 'Call simulate_edit with exactly this edit first, then submit it.'}` }, event: { title: 'Rejected the choice', detail: 'It was not simulated first.', rejected: true }, retry: true };
       }
-      const decision = { title: 'Chose an option', detail: a.reason, agentReason: true, note: a.summary };
+      const decision = { title: 'Chose an option', detail: reason, agentReason: true, note: summary };
       let out;
-      try { out = await ctx.submitEdit({ ops, agentNote: a.summary, runId: ctx.runId }); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'The choice was refused', detail: e.message, rejected: true }, retry: true }; }
+      try { out = await ctx.submitEdit({ ops, agentNote: summary, runId: ctx.runId }); } catch (e) { return { result: { accepted: false, error: e.message }, event: { title: 'The choice was refused', detail: e.message, rejected: true }, retry: true }; }
       const result = { accepted: true, outcome: out.outcome, summary: out.summary, ...(out.error ? { error: out.error } : {}) };
       return { result, final: { kind: 'submitted', outcome: out.outcome, proposalId: out.proposalId, summary: out.summary, within: out.mandate?.within, reasons: out.mandate?.reasons?.map((r) => r.text) ?? [], money: out.money, effect: out.effect }, decision };
     },
@@ -265,7 +295,7 @@ export function createTools() {
 
   add({
     name: 'no_change',
-    description: 'Finish without changing anything, when the facts show the plan is fine. Say what you checked. Ends the task.',
+    description: 'Finish without changing anything, when the facts show the plan is fine or the traveler only asked a question. Say what you checked. Ends the task.',
     terminal: true,
     parameters: { type: 'object', properties: { note: { type: 'string', description: 'What you checked and why nothing needs to change.', maxLength: 400 } }, required: ['note'] },
     run: async (a) => ({ result: { done: true }, final: { kind: 'no_change', note: String(a.note).slice(0, 400) }, event: { title: 'Decided nothing needs to change', detail: String(a.note).slice(0, 400), agentReason: true } }),

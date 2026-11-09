@@ -336,6 +336,7 @@ function proposalCard() {
   const btnText = p.kind === 'close' ? 'Confirm and close the trip' : p.actions.every((a) => a.type === 'refund') ? `Confirm and refund ${usd(p.mostCanMoveCents)}` : 'Confirm this change';
   const unfunded = p.unfunded?.length ? `<div class="notice">Never booked, so there is nothing to settle for: ${p.unfunded.map((u) => `${esc(u.title)} (${usd(u.cents)})`).join(', ')}.</div>` : '';
   const why = p.outside?.length ? `<div class="notice waits"><b>Why the agent did not just do it</b><ul>${p.outside.map((r) => `<li>${esc(r.text)}</li>`).join('')}</ul></div>` : '';
+  const loss = p.operatorLoss?.length ? `<div class="notice waits"><b>What this would cost you at the operator</b><ul>${p.operatorLoss.map((l) => `<li>${esc(l.title)}: ${usd(l.lossCents)} (${esc(l.why)})${l.quote ? `<blockquote>&ldquo;${esc(l.quote)}&rdquo; <small>from your terms</small></blockquote>` : ''}</li>`).join('')}</ul></div>` : '';
   const note = p.agentNote ? `<div class="agentnote"><b>Agent's note</b> ${esc(p.agentNote)}</div>` : '';
   let action;
   if (!owner) action = '<div class="hint">Only the person who planned this trip can confirm it.</div>';
@@ -351,7 +352,7 @@ function proposalCard() {
     ${note}
     <ul class="acts">${p.lines.map((l) => `<li class="${l.type}"><span>${esc(l.text)}</span></li>`).join('')}</ul>
     <div class="effect">${esc(p.effectText)}</div>
-    ${unfunded}${why}
+    ${unfunded}${loss}${why}
     <div class="sumline"><span>Most that can move in PayPal: <b>${usd(p.mostCanMoveCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
     ${p.kind === 'checkout' && owner && !t.ledger.length ? mandateEditor(p) : ''}
     ${action}
@@ -416,11 +417,13 @@ function termsPanel() {
     ${termsList()}
   </details>`;
 }
+const ruleText = (p) => (p.nonRefundable ? 'non-refundable' : [p.freeCancelUntil && `free to cancel until ${esc(p.freeCancelUntil)}`, p.penaltyPercent != null && `${p.penaltyPercent}% charged ${p.freeCancelUntil ? 'after that' : 'if cancelled'}`].filter(Boolean).join(', '));
 function termsList() {
   const t = S.trip;
   const docs = t.documents.map((d) => `<div class="doc">${esc(d.text.length > 160 ? d.text.slice(0, 158) + '...' : d.text)}</div>`).join('');
-  const rules = t.policies.map((p) => `<blockquote>&ldquo;${esc(p.quote)}&rdquo; <small>${esc(p.itemTitle)}: ${p.nonRefundable ? 'non-refundable' : [p.freeCancelUntil && `free to cancel until ${esc(p.freeCancelUntil)}`, p.penaltyPercent != null && `${p.penaltyPercent}% charged otherwise`].filter(Boolean).join(', ')}</small></blockquote>`).join('');
-  return `${docs}${rules ? `<div class="rules"><b>Rules the agent found in your terms</b>${rules}</div>` : ''}`;
+  const rules = t.policies.filter((p) => !p.none).map((p) => `<blockquote>&ldquo;${esc(p.quote)}&rdquo; <small>${esc(p.itemTitle)}: ${ruleText(p)}</small></blockquote>`).join('');
+  const silent = t.policies.filter((p) => p.none).map((p) => esc(p.itemTitle));
+  return `${docs}${rules ? `<div class="rules"><b>Rules the agent found in your terms</b>${rules}</div>` : ''}${silent.length ? `<div class="hint">Your terms do not mention: ${silent.join(', ')}.</div>` : ''}`;
 }
 
 function agentCard() {
