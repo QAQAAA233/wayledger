@@ -1,0 +1,27 @@
+{
+ "tag": "swarm_oracle",
+ "startedAt": "2026-11-09T21:51:03.986Z",
+ "commit": "335e02e",
+ "uncommittedChangesInSrcOrEval": true,
+ "approaches": [
+  "oracle"
+ ],
+ "models": [
+  "gemma"
+ ],
+ "reps": 1,
+ "split": "swarm",
+ "fileHashes": {
+  "src/agent/prompts.js": "6b8c2977c299f5a4",
+  "src/agent/tools.js": "f50b7579fa0e09e1",
+  "src/agent/loop.js": "808e7dd815e556cf",
+  "src/agent/schema.js": "dfa39cb5298ab6b0",
+  "src/agent/model.js": "5cc19c8791354b6d",
+  "src/domain/policy.js": "a48af75f8ef316e2",
+  "src/domain/mandate.js": "734b0115b95a00ca",
+  "src/domain/delta.js": "e9c5fb135aef6709",
+  "src/engine.js": "520a7e3d222ee490",
+  "eval/world.mjs": "37c68630d6fb37a7",
+  "eval/scenarios.mjs": "6ee9242df6a8c3eb"
+ }
+}

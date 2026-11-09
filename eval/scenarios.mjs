@@ -13,6 +13,7 @@
 //
 // `split` is dev or holdout. The agent's instructions were tuned on the dev scenarios only, then frozen; the holdout
 // scenarios were run once, afterwards (see README.md).
+import { SWARM_SCENARIOS } from './swarm_scenarios.mjs';
 export const NOW = Date.parse('2026-05-01T09:00:00Z');
 export const START = '2026-05-04'; // day 1; day 2 is 2026-05-05
 const ALL = ['Ana', 'Ben', 'Cy'];
@@ -528,6 +529,8 @@ export const SCENARIOS = [
     }),
     oracle: (ids) => ({ submit: { remove: [ids.boat] } }),
   },
+  ...SWARM_SCENARIOS,
 ];
 
 export const byId = (id) => SCENARIOS.find((s) => s.id === id);
+

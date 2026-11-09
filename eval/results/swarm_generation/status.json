@@ -1,0 +1,75 @@
+{
+ "at": "2026-11-10 05:50:51",
+ "pid": 39932,
+ "slots": 8,
+ "maxCalls": 300,
+ "live": [],
+ "elapsedMin": 0.4,
+ "attempts": 0,
+ "done": 0,
+ "cached": 0,
+ "failed": 0,
+ "retried": 0,
+ "queued": 0,
+ "inflight": 0,
+ "perMin": 0,
+ "cpu": 52,
+ "freeMb": 6402,
+ "paused": null,
+ "tokens": {
+  "input": 0,
+  "output": 0,
+  "thought": 0
+ },
+ "byStage": {},
+ "hosts": [
+  {
+   "acc": "s***@gmail.com",
+   "alive": false,
+   "busy": 0,
+   "slots": 4,
+   "calls": 0,
+   "errors": 0,
+   "tokens": 0,
+   "weekly": 45.9,
+   "fiveH": 0.1,
+   "blocked": null
+  },
+  {
+   "acc": "s***@gmail.com",
+   "alive": true,
+   "busy": 0,
+   "slots": 4,
+   "calls": 0,
+   "errors": 0,
+   "tokens": 0,
+   "weekly": 37.4,
+   "fiveH": 87.9,
+   "blocked": null
+  },
+  {
+   "acc": "c***@gmail.com",
+   "alive": true,
+   "busy": 0,
+   "slots": 4,
+   "calls": 0,
+   "errors": 0,
+   "tokens": 0,
+   "weekly": 47,
+   "fiveH": 96,
+   "blocked": null
+  },
+  {
+   "acc": "s***@gmail.com",
+   "alive": false,
+   "busy": 0,
+   "slots": 4,
+   "calls": 0,
+   "errors": 0,
+   "tokens": 0,
+   "weekly": 45.9,
+   "fiveH": 83.6,
+   "blocked": null
+  }
+ ]
+}

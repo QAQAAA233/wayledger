@@ -35,7 +35,7 @@ try { commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim
 const metaFile = path.join(root, tag, 'meta.json');
 if (!fs.existsSync(metaFile)) fs.writeFileSync(metaFile, JSON.stringify({ tag, startedAt: new Date().toISOString(), commit, uncommittedChangesInSrcOrEval: dirty, approaches, models, reps, split: args.split ?? 'all', fileHashes: hashes }, null, 1));
 const jobs = [];
-for (const rep of Array.from({ length: reps }, (_, i) => i + 1)) for (const model of models) for (const approach of approaches) for (const sc of scenarios) jobs.push({ sc, approach, model, rep });
+for (const rep of Array.from({ length: reps }, (_, i) => i + 1)) for (const model of models) for (const sc of scenarios) for (const approach of approaches) jobs.push({ sc, approach, model, rep });
 const fileOf = (j) => path.join(outDir, `${j.sc.id}__${j.approach}__${['oracle', 'negative'].includes(j.approach) ? 'none' : j.model}__r${j.rep}.json`);
 const todo = jobs.filter((j) => !fs.existsSync(fileOf(j)));
 console.log(`${jobs.length} runs planned, ${jobs.length - todo.length} already on disk, ${todo.length} to do`);

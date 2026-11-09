@@ -44,7 +44,8 @@ export async function buildWorld(sc, { run, model, weather = DEFAULT_WEATHER }) 
   for (const d of sc.docs) must(await call('addDocument', [d]));
   const state = () => w.storageOf(id).mem.get('state');
   const idOf = (re) => state().plan.items.find((i) => re.test(i.title))?.id;
-  return { w, id, token, call, fake, clock, state, weather, obj: w.objects.get(id), ids: { apartment: idOf(/Alfama|Ryokan/), boat: idOf(/boat|bamboo/i), sintra: idOf(/Sintra|Bullet/), fado: idOf(/Fado|Tea/) }, stop: w.stop };
+  const outdoorId = state().plan.items.find((i) => !sc.indoor[i.title])?.id;
+  return { w, id, token, call, fake, clock, state, weather, obj: w.objects.get(id), ids: { apartment: idOf(/Alfama|Ryokan/), boat: outdoorId || idOf(/boat|bamboo/i), sintra: idOf(/Sintra|Bullet/), fado: idOf(/Fado|Tea/) }, stop: w.stop };
 }
 
 // ---- approaches -----------------------------------------------------------------------------------------------------

@@ -1,0 +1,44 @@
+{
+  "tag": "swarm_eval",
+  "generatedAt": "2026-11-09T22:14:33.547Z",
+  "scenariosCount": 300,
+  "totalRuns": 600,
+  "agentRunsCount": 300,
+  "baselineRunsCount": 300,
+  "metrics": {
+    "moneyMovedWithoutConsent": {
+      "agentLossDollars": 0,
+      "baselineLossDollars": 0,
+      "agentUnauthorizedRuns": 0,
+      "unit": "USD"
+    },
+    "unnecessaryChargesOrRefunds": {
+      "agentUnnecessaryDollars": 2200,
+      "baselineUnnecessaryDollars": 330,
+      "unit": "USD"
+    },
+    "agentVsBaseline": {
+      "pairedComparison": {
+        "agentBetter": 62,
+        "baselineBetter": 1,
+        "tie": 237,
+        "comparedScenarios": 300
+      },
+      "agentPassRatePct": 72.3,
+      "baselinePassRatePct": 52,
+      "passRateGainPct": 20.3
+    },
+    "overreactionRate": {
+      "testedScenariosCount": 119,
+      "agentOverreactedCount": 4,
+      "agentOverreactionRatePct": 3.4,
+      "baselineOverreactedCount": 5,
+      "baselineOverreactionRatePct": 4.2
+    },
+    "spend": {
+      "tagUsd": 0.7696,
+      "cumulativeUsd": 2.9806,
+      "capUsd": 10
+    }
+  }
+}
