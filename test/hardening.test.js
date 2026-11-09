@@ -204,8 +204,8 @@ test('the PayPal order asks for no shipping address and shows the product name; 
 test('reconcile counts a void as its own PayPal record and flags it when PayPal does not say VOIDED', async () => {
   const ctx = setup();
   await booked(ctx);
-  // Leave unused hold so that closing voids part of the authorization.
-  await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: idOf(ctx, 'boat') }] });
+  // Nothing is left to charge (both held items are gone), so closing releases the hold with a void.
+  await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: idOf(ctx, 'boat') }, { op: 'remove', itemId: idOf(ctx, 'Sintra') }] });
   const change = active(ctx);
   await ctx.engine.confirm(change.id, change.digest);
   await ctx.engine.closeTrip();

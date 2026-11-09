@@ -8,11 +8,11 @@ import { sha256Hex } from './domain/hash.js';
 //
 // Who may act: the person who planned the trip holds a secret token (its hash is stored with the trip). Anyone with the
 // link can look; only the holder can confirm, approve, close, change the budget, paste documents or start the agent.
-const OWNER_ONLY = new Set(['confirm', 'createOrder', 'approveOrder', 'retry', 'refreshProposal', 'rehold', 'closeTrip', 'setBudget', 'addDocument', 'setMandateTerms']);
-const RETURNS_VIEW = new Set(['confirm', 'approveOrder', 'retry', 'refreshProposal', 'rehold', 'closeTrip', 'setBudget', 'addDocument', 'setMandateTerms', 'openDueCheckout']);
+const OWNER_ONLY = new Set(['confirm', 'createOrder', 'approveOrder', 'retry', 'refreshProposal', 'rehold', 'advance', 'closeTrip', 'setBudget', 'addDocument', 'setMandateTerms']);
+const RETURNS_VIEW = new Set(['confirm', 'approveOrder', 'retry', 'refreshProposal', 'rehold', 'advance', 'closeTrip', 'setBudget', 'addDocument', 'setMandateTerms', 'openDueCheckout']);
 const READS = new Set(['view', 'exists', 'state']);
 // What the agent and the webhook receiver may call on the trip without a person's token.
-const INTERNAL = new Set(['recordPolicy', 'submitEdit', 'noteRun', 'reconcile', 'recordWebhook', 'openDueCheckout', 'syncHolds']);
+const INTERNAL = new Set(['recordPolicy', 'submitEdit', 'noteRun', 'reconcile', 'recordWebhook', 'openDueCheckout', 'syncHolds', 'settleDue']);
 
 const errData = (e) => ({ name: e.constructor.name, message: e.message, code: e.code, debugId: e.debugId, issue: e.issue });
 

@@ -2,6 +2,7 @@ import { runAgentLoop } from './loop.js';
 import { createTools } from './tools.js';
 import { AGENT_SYSTEM, userMessageFor } from './prompts.js';
 import { dayDate, lastDay } from '../domain/plan.js';
+import { itemState, reserves } from '../domain/ledger.js';
 import { UserFacingError } from '../engine.js';
 
 // Runs the agent for one trip. A run is a record in the trip's storage whose trace grows event by event, so the screen
@@ -115,7 +116,7 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
     const s = await trip.state();
     if (!s?.plan || s.closedAt) return null;
     // what PayPal says about the holds comes first, and costs no model: a hold that is gone is a fact, not a question
-    if (!simulated) { try { await trip.mutate('syncHolds'); } catch (e) { console.error('hold check failed', e); } }
+    if (!simulated) { try { await trip.mutate('syncHolds'); await trip.mutate('settleDue'); } catch (e) { console.error('hold check failed', e); } }
     const dates = [...new Set(s.plan.items.map((i) => i.day))].sort((a, b) => a - b).map((d) => [d, dayDate(s.plan.startDate, d)]).filter(([, date]) => date);
     if (simulated) {
       const day = s.plan.items.find((i) => i.category === 'activity')?.day ?? Math.min(2, lastDay(s.plan));
@@ -142,6 +143,24 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
     return start({ trigger: 'wake', diff });
   }
 
+  // The calendar's alarm: wake at the day of the next item that still has money on hold (at once if it is due now). Asked again
+  // after every step that can change what is held. `backoff` is for a charge that did not go through: try again in an hour.
+  async function ensureSettle({ backoff = false } = {}) {
+    const s = await trip.state();
+    const list = ((await storage.get('schedule')) ?? []).filter((i) => i.kind !== 'settle');
+    let at = null;
+    if (s?.settlement?.onDay && !s.closedAt && s.plan?.startDate) {
+      const held = s.plan.items.filter((i) => itemState(s.ledger, i.id).heldCents > 0);
+      const days = held.map((i) => dayDate(s.plan.startDate, i.day)).filter(Boolean).sort();
+      const open = reserves(s.ledger).some((r) => r.open);
+      const next = days[0] ?? (open ? dayDate(s.plan.startDate, lastDay(s.plan)) : null);
+      if (next) at = Math.max(Date.parse(`${next}T00:00:00Z`), now() + (backoff ? 3_600_000 : 0));
+    }
+    if (at != null) list.push({ id: uid(), at, kind: 'settle' });
+    await storage.put('schedule', list);
+    if (list.length) await storage.setAlarm(Math.min(...list.map((i) => i.at)));
+  }
+
   async function ensureWake() {
     const s = await trip.state();
     if (!s?.mandate?.terms?.enabled || s.closedAt || now() >= s.mandate.terms.validUntil) return;
@@ -159,12 +178,13 @@ export function createAgentRunner({ storage, trip, run, sources, spend, models, 
     for (const item of due) {
       try {
         if (item.kind === 'run') await execute(item.runId);
-        if (item.kind === 'wake') { await wake({}); await ensureWake(); }
+        if (item.kind === 'wake') { await wake({}); await ensureWake(); await ensureSettle(); }
+        if (item.kind === 'settle') { const out = await trip.mutate('settleDue'); await ensureSettle({ backoff: out.pending > 0 }); }
       } catch (e) { console.error('scheduled item failed', item.kind, e); }
     }
     const rest = (await storage.get('schedule')) ?? [];
     if (rest.length) await storage.setAlarm(Math.min(...rest.map((i) => i.at)));
   }
 
-  return { start, execute, wake, ensureWake, processDue, getRun, activeRun, schedule };
+  return { start, execute, wake, ensureWake, ensureSettle, processDue, getRun, activeRun, schedule };
 }

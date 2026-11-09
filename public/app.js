@@ -12,11 +12,11 @@ const dayDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short
 const STATUS = { planned: 'Planned', held: 'Held', paid: 'Paid', released: 'Released', refunded: 'Refunded', 'part-refunded': 'Part refunded' };
 const OPS = { authorize: 'Trip hold', allocate: 'Set aside', release: 'Freed up', capture: 'Charge', void: 'Hold released', refund: 'Refund' };
 const PAYPAL_OPS = ['authorize', 'capture', 'void', 'refund'];
-const opLabel = (f) => (f.external ? (f.op === 'void' ? 'Hold cancelled by PayPal' : 'Freed: hold cancelled') : OPS[f.op] ?? f.op);
+const opLabel = (f) => (f.op === 'capture' && f.final ? 'Final charge' : f.external ? (f.op === 'void' ? 'Hold cancelled by PayPal' : 'Freed: hold cancelled') : OPS[f.op] ?? f.op);
 const isoIn = (days) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 
 const SAMPLE_TRIPS = [
-  'Three friends - Ana, Ben and Cy - 4 days in Lisbon. Budget $1,200 total. A flat, a sunset boat tour that must be paid in advance, and a Sintra day trip.',
+  'Three friends - Ana, Ben and Cy - 4 days in Lisbon. Budget $1,200 total. A flat, a sunset boat tour and a Sintra day trip.',
   'Family of four, long weekend in Kyoto. Budget $2,400. A ryokan night, a cooking class and the bullet train.',
   'Two of us, a weekend at Lake Tahoe, $900 all in. Cabin, kayak rental and one nice dinner.',
 ];
@@ -105,7 +105,7 @@ function setTrip(t) {
 
 function createTrip() {
   const prompt = S.draft.trim();
-  const startDate = S.startDate || isoIn(4);
+  const startDate = S.startDate || isoIn(0);
   const go = () => run('Planning your trip...', async () => {
     const t = await api('/trips', 'POST', { prompt, startDate });
     keepOwnerToken(t.id, t.ownerToken);
@@ -176,6 +176,11 @@ function rehold() {
 function refreshFailed() {
   const p = S.trip.failed;
   const go = () => run('Working out what is left from what really happened...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/refresh`, 'POST')), go);
+  return go();
+}
+
+function advanceDay() {
+  const go = () => run('Moving the demo clock one day...', async () => setTrip(await api(`/trips/${S.trip.id}/advance`, 'POST', { days: 1 })), go);
   return go();
 }
 
@@ -275,7 +280,7 @@ function landing() {
       <label for="prompt" class="sr" style="position:absolute;left:-9999px">Describe your trip</label>
       <textarea id="prompt" rows="4" maxlength="1200" placeholder="Three of us, Lisbon, 4 days, $1,200 total. A flat, a boat tour, a Sintra day trip.">${esc(S.draft)}</textarea>
       <div class="row" style="margin-top:12px">
-        <label class="date">First day <input type="date" id="start" min="${isoIn(0)}" max="${isoIn(365)}" value="${esc(S.startDate || isoIn(4))}"></label>
+        <label class="date">First day <input type="date" id="start" min="${isoIn(0)}" max="${isoIn(365)}" value="${esc(S.startDate || isoIn(0))}"></label>
         <button class="btn" data-act="plan" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : 'Plan my trip'}</button>
       </div>
       <div class="row" style="margin-top:8px"><span style="color:var(--muted);font-size:.85rem">Try one:</span></div>
@@ -285,7 +290,7 @@ function landing() {
     </div>
     <div class="how">
       <div><b>1. Plan</b>One sentence in. Itinerary, budget and who owes what come out.</div>
-      <div><b>2. Sign your limits</b>You approve one PayPal hold, and the most the agent may refund or add on its own. Prepaid items are charged now.</div>
+      <div><b>2. Sign your limits</b>You approve one PayPal hold. Nothing is charged before the day of each item, and the agent may only cancel, refund or add within the limits you set.</div>
       <div><b>3. Let it watch</b>The agent checks the forecast and your terms, tries options, and acts inside your limits. Anything bigger waits for you.</div>
     </div>
   </section>`;
@@ -293,7 +298,7 @@ function landing() {
 
 function itemRow(i) {
   const st = i.money.status;
-  const detail = st === 'held' ? `${usd(i.money.heldCents)} on hold` : st === 'paid' ? `${usd(i.money.paidCents)} paid` : st === 'part-refunded' ? `${usd(i.money.paidCents)} paid, ${usd(i.money.refundedCents)} refunded` : '';
+  const detail = st === 'held' ? `${usd(i.money.heldCents)} held${i.dueOn && S.trip.settlement ? `, charged on ${dateText(i.dueOn)}` : ''}` : st === 'paid' ? `${usd(i.money.paidCents)} charged${i.chargedOn ? ` ${dateText(i.chargedOn)}` : ''}${i.chargedSimulated ? ' (simulated day)' : ''}` : st === 'part-refunded' ? `${usd(i.money.paidCents)} charged, ${usd(i.money.refundedCents)} refunded` : st === 'released' ? 'never charged' : '';
   const wd = i.placeId?.startsWith('wd:') ? ` &middot; <a href="https://www.wikidata.org/wiki/${esc(i.placeId.slice(3))}" target="_blank" rel="noopener">real place</a>` : '';
   const basis = i.amountBasis === 'same_as_replaced' ? '<div class="basis">Budget set aside at the price of what it replaces. The ticket price was not looked up.</div>' : '';
   const when = i.amountCents === 0 ? 'free' : i.prepaid ? 'paid in advance' : 'paid when the trip closes';
@@ -450,7 +455,8 @@ function agentCard() {
   const input = t.closed || !t.owner ? '' : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="change" maxlength="800" placeholder="Tell the agent what changed..." value="${esc(S.changeDraft)}" aria-label="What changed"><button class="btn" data-act="change" ${working ? 'disabled' : ''}>Send</button></div>
     <div class="chips">${SAMPLE_CHANGES.map((c, i) => `<button class="chip" data-act="sample-change" data-i="${i}">${esc(c.length > 54 ? c.slice(0, 52) + '...' : c)}</button>`).join('')}</div>`;
   const demo = t.owner && !t.closed && t.ledger.length ? `<div class="demo"><b>Demo</b> The agent checks the real forecast on a schedule${t.nextWakeAt ? ` (next check about ${esc(new Date(t.nextWakeAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }))})` : ''}. This button runs that check now with a <b>simulated</b> storm forecast, so you can watch it work.
-    <div class="row"><button class="btn small ghost" data-act="demo" ${working ? 'disabled' : ''}>Fast-forward to the next check (simulated storm)</button></div></div>` : '';
+    <div class="row"><button class="btn small ghost" data-act="demo" ${working ? 'disabled' : ''}>Fast-forward to the next check (simulated storm)</button></div>
+    ${t.settlement && t.plan.startDate ? `<div style="margin-top:8px">The calendar charges each item on its own day. This moves the demo clock one day ahead so you can watch the money follow the trip; what it does is marked <b>simulated</b>.</div><div class="row"><button class="btn small ghost" data-act="advance" ${working ? 'disabled' : ''}>Fast-forward a day (simulated)</button></div>` : ''}</div>` : '';
   return `<section class="card agent" id="agent-card"><h2>Agent</h2>
     ${authorityLine()}
     <div id="trail" class="trailbox">${trailHtml()}</div>
@@ -508,18 +514,19 @@ function tripView() {
   const t = S.trip; const tot = t.totals;
   const per = Object.entries(t.perPerson).map(([n, c]) => `<span>${esc(n)} <b>${usd(c)}</b></span>`).join('');
   const showClose = t.owner && t.canClose && t.proposal?.kind !== 'close' && !t.failed;
-  const closedNote = t.closed ? `<div class="notice closed">This trip is closed (${esc(dayDate(t.closedAt))}). Held items were charged and the unused hold was released in PayPal, so the plan and the money can no longer change. Start a new trip to plan something else.</div>` : '';
+  const closedNote = t.closed ? `<div class="notice closed">This trip is closed (${esc(dayDate(t.closedAt))}). What happened was charged and the rest was released in PayPal (nothing was charged for what did not happen), so the plan and the money can no longer change. Start a new trip to plan something else.</div>` : '';
   const viewOnly = !t.owner ? '<div class="notice viewonly">You are looking at a shared link. Anyone can look; only the person who planned this trip can change it.</div>' : '';
   const deferred = t.holdFrom ? `<div class="notice">This trip is too far away to hold money for yet: PayPal keeps a hold for 29 days. The hold opens on ${esc(dateText(t.holdFrom))}.</div>` : '';
   const unusedHold = tot.unusedReserveCents > 0 ? ` (+${usd(tot.unusedReserveCents)} spare)` : '';
   const dates = t.plan.startDate ? ` &middot; ${esc(dateText(t.plan.startDate))}` : '';
+  const clockNote = t.settlement?.simulated ? `<div class="notice simclock" id="sim-clock"><span class="simbadge">SIMULATED</span> The demo clock says ${esc(dateText(t.settlement.today))}; the real day is ${esc(dateText(t.settlement.realToday))}. Charges made while it runs ahead are marked simulated.</div>` : '';
   const agent = agentCard();
   const proposal = proposalCard();
   const itin = `<section class="card" id="itinerary-card"><h2>Itinerary</h2>${itinerary()}<h2 style="margin-top:14px">Shares</h2><div class="per">${per}</div></section>`;
   const failed = failedCard();
   return `<div class="tripbar"><div><h1>${esc(t.plan.title)}</h1><div class="sub">${esc(t.plan.destination)}${dates} &middot; ${esc(t.plan.travelers.join(', '))}</div></div><div class="row">${showClose ? `<button class="btn small" data-act="close" ${S.busy ? 'disabled' : ''}>Close trip</button>` : ''}<button class="btn ghost small" data-act="new">New trip</button></div></div>
-  ${viewOnly}${closedNote}${deferred}${holdLostBanner()}${budgetBar()}
-  <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold${unusedHold}</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Paid</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
+  ${viewOnly}${closedNote}${clockNote}${deferred}${holdLostBanner()}${budgetBar()}
+  <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold${unusedHold}</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Charged</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Never charged</small><b>${usd(tot.releasedCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
   <div class="layout">
     ${narrow() ? `<div class="col">${agent}${proposal}${failed}${itin}${ledgerCard()}</div>` : `<div class="col">${itin}${ledgerCard()}</div><div class="col">${proposal}${failed}${agent}</div>`}
   </div>`;
@@ -624,6 +631,7 @@ $app.addEventListener('click', (e) => {
   else if (a === 'confirm') confirmRelease();
   else if (a === 'refresh') refreshProposal();
   else if (a === 'retry-proposal') retryProposal();
+  else if (a === 'advance') advanceDay();
   else if (a === 'refresh-failed') refreshFailed();
   else if (a === 'rehold') rehold();
   else if (a === 'retry-error') S.error?.retryFn?.();

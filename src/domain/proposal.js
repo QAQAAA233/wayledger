@@ -19,11 +19,12 @@ const canonical = (p) => JSON.stringify({
   ...(p.mandateTerms ? { mandateTerms: p.mandateTerms } : {}),
   ...(p.humanOnly ? { humanOnly: p.humanOnly } : {}),
   ...(p.operatorLoss ? { operatorLoss: p.operatorLoss } : {}),
+  ...(p.settleOnDay ? { settleOnDay: true } : {}),
 });
 
 // `summary` is written by code from the actions. `agentNote` is what the model said; it is shown apart, labelled,
 // and is not part of what anyone confirms.
-export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, agentNote, source, now, ttlMs = PROPOSAL_TTL_MS }) {
+export async function createProposal({ id, tripId, kind, summary, actions, newPlan = null, unfunded, mandateTerms, humanOnly, operatorLoss, agentNote, source, settleOnDay, now, ttlMs = PROPOSAL_TTL_MS }) {
   // A change of the plan that moves no money is still a proposal: a person confirms it, or the signed limits do.
   if (actions.length === 0 && !newPlan && kind !== 'close') throw new MoneyGuardError('NO_ACTIONS', 'This change does not move any money.');
   const proposal = {
@@ -34,6 +35,7 @@ export async function createProposal({ id, tripId, kind, summary, actions, newPl
     ...(mandateTerms ? { mandateTerms } : {}),
     ...(humanOnly ? { humanOnly } : {}),
     ...(operatorLoss ? { operatorLoss } : {}),
+    ...(settleOnDay ? { settleOnDay: true } : {}),
     ...(agentNote ? { agentNote } : {}),
     ...(source ? { source } : {}),
     capCents: actions.reduce((a, x) => a + x.cents, 0),
@@ -72,6 +74,17 @@ export async function confirmByMandate(proposal, mandate, evaluation, now) {
   return proposal;
 }
 
+// The calendar confirms a charge only because the person approved it with the hold ("each item is charged on its day"):
+// `settlement` is what the first approval stored. Code finds it still true; nothing a model writes is involved.
+export async function confirmBySchedule(proposal, settlement, now) {
+  if (proposal.status !== 'pending') throw new MoneyGuardError('NOT_PENDING', `This proposal is already ${proposal.status}.`);
+  if (!settlement?.onDay) throw new MoneyGuardError('OUTSIDE_SCHEDULE', 'No approval says that items are charged on their day.');
+  if ((await sha256Hex(canonical(proposal))) !== proposal.digest) throw new MoneyGuardError('TAMPERED', 'The proposal no longer matches its digest.');
+  proposal.status = 'confirmed';
+  proposal.confirmation = { by: 'schedule', at: now, digest: proposal.digest };
+  return proposal;
+}
+
 // Every single PayPal money call goes through this check first: placing a hold, charging, refunding and releasing.
 // `ctx.mandate` and `ctx.refundedSoFarCents` are supplied by the engine for mandate-confirmed proposals;
 // `ctx.allowExpired` lets a proposal that already started finish (a retry), never begin, after it expired.
@@ -87,6 +100,12 @@ export async function assertMayMove(proposal, action, movedSoFarCents, now, ctx 
     throw new MoneyGuardError('NOT_IN_PROPOSAL', 'This action is not part of the confirmed proposal.');
   }
   if (movedSoFarCents + action.cents > proposal.capCents) throw new MoneyGuardError('OVER_CAP', 'This would exceed the confirmed cap.');
+  if (proposal.confirmation.by === 'schedule') {
+    // a schedule only ever charges an item on its day, or releases a finished trip's hold; never a refund, never early
+    const settleKinds = ['capture', 'void'];
+    if (!settleKinds.includes(action.type) || !action.settle || !ctx.settlement?.onDay) throw new MoneyGuardError('OUTSIDE_SCHEDULE', 'A schedule only charges an item on its day, as the person approved with the hold.');
+    if (!ctx.settleDate || ctx.settleDate < action.dueOn) throw new MoneyGuardError('NOT_DUE', 'This has not happened yet, so it is not charged.');
+  }
   if (proposal.confirmation.by === 'mandate') {
     const m = ctx.mandate;
     if (!m || m.digest !== proposal.confirmation.mandateDigest || !(await mandateIntact(m))) throw new MoneyGuardError('MANDATE_TAMPERED', 'The signed limits no longer match.');

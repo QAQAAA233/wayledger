@@ -30,8 +30,10 @@ async function withApp(opts, fn, view) {
   }
 }
 
-const plan = async (page, prompt = PROMPT) => {
+const dayIn = (n) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
+const plan = async (page, prompt = PROMPT, startsIn = 4) => {
   await page.type('#prompt', prompt);
+  await page.$eval('#start', (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, dayIn(startsIn));
   await page.click('[data-act="plan"]');
 };
 const buttonReady = (page, timeout = 5000) => page.waitForSelector('#pp #stub-paypal', { timeout });
@@ -41,7 +43,8 @@ const payAsBuyer = (page) => page.evaluate(async () => {
 });
 const text = (page, sel) => page.$eval(sel, (el) => el.innerText);
 const setField = (page, sel, value) => page.$eval(sel, (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, value);
-const booked = async (page) => { await plan(page); await buttonReady(page); await payAsBuyer(page); await page.waitForSelector('[data-act="close"]'); };
+const booked = async (page, startsIn = 4) => { await plan(page, PROMPT, startsIn); await buttonReady(page); await payAsBuyer(page); await page.waitForSelector('[data-act="close"]'); };
+const fastForward = async (page) => { await page.click('[data-act="advance"]'); await page.waitForFunction(() => !document.querySelector('.spin'), { timeout: 8000 }); };
 // the words of the product's own internals must never reach a traveler
 const JARGON = /free quota|use reserve|confirmed cap|released or returned|\bnet:|\bquota\b|\breserve\b|undefined|\[object|\bnull\b/i;
 const noJargon = async (page, where) => assert.doesNotMatch(await page.evaluate(() => document.body.innerText), JARGON, where);
@@ -400,20 +403,20 @@ test('cancelling something the terms make non-refundable waits for the person, a
 
 test('Flow F: a hold PayPal cancelled shows what has no money behind it, offers a new hold, and closing is never stuck', { skip }, async () => {
   await withApp({}, async (page, app) => {
-    await booked(page);
+    await booked(page, 0); // the trip starts today: Sintra (day 3) is the one thing still on hold
     const authId = [...app.fake.auths.keys()][0];
     app.fake.voidOutside(authId);
 
-    // the person closes the trip; PayPal refuses the charge because the hold is gone
-    await page.click('[data-act="close"]');
-    await page.waitForSelector('[data-act="confirm"]');
-    await page.click('[data-act="confirm"]');
+    // two days pass on the demo clock; on day 3 PayPal refuses the charge because the hold is gone
+    await fastForward(page);
+    await fastForward(page);
     await page.waitForSelector('#hold-lost', { timeout: 8000 });
     const banner = await text(page, '#hold-lost');
     assert.match(banner, /PayPal no longer holds part of this trip's money/);
     assert.match(banner, /Sintra day trip \(\$120\.00\)/);
-    assert.equal(await page.$('.failed, [data-act="retry-proposal"]'), null, 'nothing is left half-done to retry');
+    assert.equal(await page.$('[data-act="retry-proposal"]'), null, 'nothing is left half-done to retry');
     assert.notEqual(await page.$('[data-act="close"]'), null, 'and the trip can still be closed');
+    assert.match(await text(page, '#sim-clock'), /SIMULATED/);
     await noJargon(page, 'the lost-hold banner');
 
     // a new hold for exactly that money, approved in PayPal like the first one
@@ -426,7 +429,7 @@ test('Flow F: a hold PayPal cancelled shows what has no money behind it, offers 
     await page.click('[data-act="verify"]');
     await page.waitForSelector('.verify .ok', { timeout: 5000 });
 
-    // and closing now charges the new hold and ends the trip
+    // and closing now charges what has happened (Sintra, on the new hold) and ends the trip
     await page.click('[data-act="close"]');
     await page.waitForSelector('[data-act="confirm"]');
     await page.click('[data-act="confirm"]');
@@ -453,8 +456,10 @@ test('the card says what it does ("Hold the money with PayPal"), and the date th
 test('a step PayPal refuses is not a dead end: the card offers retry and "work out what is left again", and the second one gets the trip closed', { skip }, async () => {
   const refuse = { on: false, [Symbol.match]: (s) => (refuse.on && /POST .*capture$/.test(s) ? [s] : null) }; // PayPal says no to charges while this is on
   await withApp({ failOn: refuse }, async (page) => {
-    await booked(page);
+    await booked(page, 0);
     refuse.on = true;
+    await fastForward(page); // days 2 and 3 come: the calendar's charge is refused, quietly, and tried again later
+    await fastForward(page);
     await page.click('[data-act="close"]');
     await page.waitForSelector('[data-act="confirm"]');
     await page.click('[data-act="confirm"]');

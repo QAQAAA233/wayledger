@@ -99,7 +99,7 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     async capture(authId, itemId, cents, { requestId, proposalId, finalCapture = false }) {
       const c = await call('POST', `/v2/payments/authorizations/${authId}/capture`, { amount: amount(cents), final_capture: Boolean(finalCapture) }, requestId);
       const full = await call('GET', `/v2/payments/captures/${c.id}`);
-      return fact('capture', itemId, full, { parentId: authId, proposalId });
+      return fact('capture', itemId, full, { parentId: authId, proposalId, final: Boolean(full.final_capture) });
     },
 
     async voidAuthorization(authId, itemId, { requestId, proposalId, cents }) {

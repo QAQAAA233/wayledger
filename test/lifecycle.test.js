@@ -89,16 +89,17 @@ test('weather change, refund, and close trip: money freed and set aside again, a
   assert.equal(itemState(ctx.store.peek().ledger, apt).status, 'refunded');
   assert.ok(ctx.fake.refs.size === 1 && [...ctx.fake.refs.values()][0].note === 'Wayledger: your trip plan changed', 'PayPal gets fixed words, not text from a model');
 
-  // 4. Close trip: charges all remaining held items and releases the $114 left in the first hold
+  // 4. Close trip: charges all remaining held items; the last charge on each hold is final, so PayPal releases the $114 left in the first hold
   await ctx.engine.closeTrip();
   p = active(ctx);
   assert.equal(p.kind, 'close');
-  assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['capture', 6600], ['capture', 12000], ['capture', 25000], ['void', 11400]]);
+  assert.deepEqual(p.actions.map((a) => [a.type, a.cents]), [['capture', 6600], ['capture', 12000], ['capture', 25000]]);
+  assert.equal(p.actions.filter((a) => a.finalCapture).reduce((n, a) => n + a.releasesCents, 0), 11400, 'the final charges release the rest of the holds');
   await confirmAndRun(ctx);
   s = ctx.store.peek();
   for (const item of s.plan.items) assert.equal(itemState(s.ledger, item.id).status, 'paid');
   assert.equal(reserves(s.ledger).every((r) => !r.open), true);
-  assert.equal(ctx.fake.auths.get(reserves(s.ledger)[0].id).status, 'VOIDED');
+  assert.equal(ctx.fake.auths.get(reserves(s.ledger)[0].id).status, 'CAPTURED', 'a final charge closes the hold at PayPal');
   const rec = await ctx.engine.reconcile();
   assert.equal(rec.allMatch, true, JSON.stringify(rec));
   assert.equal(rec.planCheck.ok, true, 'the money follows the plan');

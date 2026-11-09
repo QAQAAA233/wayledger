@@ -1,7 +1,7 @@
 import { normalizePlan, applyChange, planTotalCents, perPersonCents, splitChanged, PlanError, HUMAN_ONLY_OPS, isIsoDate, addDays, tripEndDate, dayDate } from './domain/plan.js';
-import { diffToActions, checkoutActions, closeActions, shortfalls, BUFFER_ID } from './domain/delta.js';
+import { diffToActions, checkoutActions, closeActions, settleActions, shortfalls, itemDueOn, BUFFER_ID } from './domain/delta.js';
 import { appendFact, itemState, reserves, ledgerTotals, reconcile, holdLostFacts } from './domain/ledger.js';
-import { createProposal, confirmProposal, confirmByMandate, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
+import { createProposal, confirmProposal, confirmByMandate, confirmBySchedule, assertMayMove, MoneyGuardError, PROPOSAL_TTL_MS } from './domain/proposal.js';
 import { createMandate, evaluateMandate, defaultTerms, normalizeTerms, describeTerms, raiseRoomCents } from './domain/mandate.js';
 import { describeAction, describeEffect, paypalEffect, proposalSummary } from './domain/describe.js';
 import { validatePolicyFact, operatorLoss, MAX_DOC_CHARS, PolicyError } from './domain/policy.js';
@@ -22,6 +22,7 @@ export function upgradeState(s) {
   if (!s) return s;
   s.documents ??= []; s.policies ??= []; s.webhooks ??= []; s.runs ??= []; s.mandate ??= null; s.mandateDraft ??= null; s.holdFrom ??= null; s.ownerTokenHash ??= null;
   if (s.mandate) s.mandate.used.cancelledCents ??= 0;
+  s.simDays ??= 0; s.settlement ??= null;
   return s;
 }
 const DAY_MS = 86_400_000;
@@ -35,6 +36,9 @@ const HOLD_GONE = ['AUTHORIZATION_VOIDED', 'AUTHORIZATION_EXPIRED'];
 export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs = PROPOSAL_TTL_MS }) {
   const log = (s, kind, text) => { s.events.push({ at: now(), kind, text: String(text).slice(0, 600) }); if (s.events.length > 80) s.events.shift(); };
   const today = () => new Date(now()).toISOString().slice(0, 10);
+  // The day the calendar charges for: today, or the day the demo clock has been moved to. null when the trip has no start date.
+  const settleDate = (s) => (s.plan?.startDate ? addDays(today(), s.simDays ?? 0) : null);
+  const money = (c) => `$${(c / 100).toFixed(2)}`;
 
   const asUserError = (e) => {
     if (e instanceof PlanError || e instanceof MoneyGuardError || e instanceof UserFacingError || e instanceof PolicyError) return new UserFacingError(e.message, e.code ?? 'PLAN');
@@ -75,7 +79,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     const buffer = terms.enabled ? Math.max(0, terms.planIncreaseCapCents - spare) : 0;
     const actions = checkoutActions(s.plan, s.ledger, buffer);
     if (actions.length === 0) { s.activeProposal = null; return null; }
-    return fresh(s, 'checkout', proposalSummary(booked ? 'rehold' : 'checkout'), actions, null, booked ? {} : { mandateTerms: terms });
+    return fresh(s, 'checkout', proposalSummary(booked ? 'rehold' : 'checkout'), actions, null, booked ? { settleOnDay: true } : { mandateTerms: terms, settleOnDay: true });
   }
 
   const unfundedItems = (s) => shortfalls(s.plan, s.ledger).map(({ item, cents }) => ({ itemId: item.id, title: item.title, cents }));
@@ -91,8 +95,42 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     return true;
   }
 
+  // When nothing is held any more, every day of the trip has come and no item is missing its money, the trip is over.
+  function finishIfDone(s) {
+    const day = settleDate(s);
+    if (s.closedAt || !day || s.ledger.length === 0 || reserves(s.ledger).some((r) => r.open) || shortfalls(s.plan, s.ledger).length) return;
+    if (!s.plan.items.every((i) => (itemDueOn(s.plan, i) ?? '9999') <= day)) return;
+    s.closedAt = now();
+    log(s, 'system', `The trip is over. Everything that happened was charged (${money(ledgerTotals(s.ledger).paidCents)}), and ${money(ledgerTotals(s.ledger).releasedCents)} was never charged.`);
+  }
+
+  async function settle() {
+    const s = await load();
+    if (!s?.plan || s.closedAt || !s.settlement?.onDay) return { captured: 0, pending: 0 };
+    const day = settleDate(s);
+    if (!day) return { captured: 0, pending: 0 };
+    for (const q of Object.values(s.proposals)) if (q.kind === 'settle' && q.status === 'failed') q.status = 'superseded'; // the next try starts from what really happened
+    const actions = settleActions(s.plan, s.ledger, day);
+    let captured = 0;
+    if (actions.length) {
+      const charge = actions.filter((a) => a.type === 'capture');
+      const parts = [];
+      if (charge.length) parts.push(`charged ${money(charge.reduce((n, a) => n + a.cents, 0))} for ${charge.map((a) => a.title).join(', ')}`);
+      if (actions.some((a) => a.type === 'void' || a.finalCapture)) parts.push('the rest of the hold was released');
+      const summary = `${(s.simDays ?? 0) > 0 ? 'SIMULATED day ' : 'Day '}${day}: ${parts.join(' and ')}.`;
+      const p = await createProposal({ id: uid(), tripId: s.id, kind: 'settle', summary, actions, now: now() });
+      await confirmBySchedule(p, s.settlement, now());
+      s.proposals[p.id] = p;
+      await execute(s, p);
+      captured = p.results.filter((r) => r.ok && p.actions[r.index].type === 'capture').length;
+    }
+    finishIfDone(s);
+    await store.put(s);
+    return { captured, pending: s.closedAt ? 0 : settleActions(s.plan, s.ledger, day).length };
+  }
+
   async function proposeClose(s) {
-    const actions = closeActions(s.plan, s.ledger);
+    const actions = closeActions(s.plan, s.ledger, settleDate(s));
     const unfunded = unfundedItems(s);
     if (actions.length === 0) {
       s.closedAt = now();
@@ -113,7 +151,9 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     // A proposal that already started may finish after it expired (a retry); one that never started may not begin.
     const started = () => p.results.some((r) => r.ok) || Boolean(p.captured?.length);
     // a refund under the signed limits is counted against them the moment it goes out, so a proposal that never finishes cannot hide it
-    const ctx = () => ({ mandate: s.mandate, refundedSoFarCents: 0, allowExpired: started() });
+    const ctx = () => ({ mandate: s.mandate, refundedSoFarCents: 0, allowExpired: started(), settlement: s.settlement, settleDate: settleDate(s) });
+    // a charge made by the calendar, or by closing, remembers which day it belongs to (and whether that day was the demo clock's)
+    const stamp = ['settle', 'close'].includes(p.kind) && settleDate(s) ? { day: settleDate(s), ...((s.simDays ?? 0) > 0 ? { simulated: true } : {}) } : null;
     let failedAuth = null;
     const step = async (i, fn) => {
       if (done(i)) return;
@@ -121,7 +161,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       try {
         await assertMayMove(p, action, moved(), now(), ctx());
         const facts = await fn(action);
-        for (const f of [].concat(facts)) appendFact(s.ledger, f);
+        for (const f of [].concat(facts)) appendFact(s.ledger, f.op === 'capture' && stamp ? { ...f, ...stamp } : f);
         p.results.push({ index: i, ok: true });
         if (byMandate && action.type === 'refund') s.mandate.used.refundCents += action.cents;
       } catch (e) {
@@ -190,7 +230,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         p.error = 'PayPal no longer holds this money, so the steps that needed it could not run.';
         if (p.newPlan) s.plan = p.newPlan;
         if (byMandate) s.mandate.uses = [...s.mandate.uses, { proposalId: p.id, refundCents: refundedSoFar(), at: now() }].slice(-50);
-        s.activeProposal = null;
+        if (s.activeProposal === p.id) s.activeProposal = null;
         return;
       }
       // a confirmation that ran out before anything started is an expired proposal, which can be worked out again
@@ -202,11 +242,13 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     if (p.newPlan) s.plan = p.newPlan;
     if (p.kind === 'close') s.closedAt = now();
     if (byMandate) s.mandate.uses = [...s.mandate.uses, { proposalId: p.id, refundCents: refundedSoFar(), at: now() }].slice(-50);
+    // the first approval also said "each item is charged on its day": from then on the calendar may charge what has happened
+    if (p.kind === 'checkout' && p.settleOnDay && !s.settlement) s.settlement = { onDay: true, since: now(), proposalId: p.id };
     if (p.kind === 'checkout' && p.mandateTerms?.enabled && !s.mandate) {
       s.mandate = await createMandate({ tripId: s.id, terms: p.mandateTerms, baselineTotalCents: planTotalCents(s.plan), proposalId: p.id, now: now() });
       log(s, 'system', `You signed limits for the agent: ${describeTerms(s.mandate.terms)}`);
     }
-    s.activeProposal = null;
+    if (s.activeProposal === p.id) s.activeProposal = null;
     log(s, 'system', `Done: ${p.summary}`);
   }
 
@@ -330,7 +372,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         if (!isIsoDate(startDate)) throw new UserFacingError('Pick the day the trip starts.', 'BAD_INPUT');
         if (startDate < addDays(today(), -1) || startDate > addDays(today(), 365)) throw new UserFacingError('The start date must be within the next year.', 'BAD_INPUT');
       }
-      const s = { id, createdAt: now(), closedAt: null, ownerTokenHash, plan: null, ledger: [], proposals: {}, activeProposal: null, events: [], mandate: null, mandateDraft: null, documents: [], policies: [], webhooks: [], runs: [], holdFrom: null };
+      const s = { id, createdAt: now(), closedAt: null, ownerTokenHash, plan: null, ledger: [], proposals: {}, activeProposal: null, events: [], mandate: null, mandateDraft: null, documents: [], policies: [], webhooks: [], runs: [], holdFrom: null, simDays: 0, settlement: null };
       log(s, 'user', prompt);
       try {
         s.plan = await ai.planTrip(prompt, (raw, attempt = 1) => {
@@ -476,6 +518,26 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       await proposeClose(s);
       await store.put(s);
       return s;
+    },
+
+    // The calendar charges what has happened: each item on its day, for what was set aside for it. The last charge on a hold is
+    // final (PayPal releases the rest by itself); when the trip is over and something is still on hold, that is released. It is
+    // confirmed by the schedule the person approved with the hold. No model is asked, and no waiting proposal is touched.
+    async settleDue() { return settle(); },
+
+    // The demo clock: move the day the calendar charges for forward, so that the days of a trip can be watched in a minute.
+    // Everything it does is marked as simulated; the PayPal calls are real sandbox calls.
+    async advance(days) {
+      const s = await load();
+      mustBeOpen(s);
+      const n = Number(days);
+      if (!Number.isInteger(n) || n < 1 || (s.simDays ?? 0) + n > 30) throw new UserFacingError('The demo clock moves 1 to 30 days in all.', 'BAD_INPUT');
+      if (!s.settlement?.onDay || !s.plan.startDate) throw new UserFacingError('Nothing is charged by the calendar on this trip, so there is no day to fast-forward to.', 'BAD_INPUT');
+      s.simDays = (s.simDays ?? 0) + n;
+      log(s, 'system', `SIMULATED: the demo clock moved to ${settleDate(s)} (today is ${today()}).`);
+      await store.put(s);
+      await settle();
+      return load();
     },
 
     // At its scheduled look the trip asks PayPal about the holds it believes are open. A hold PayPal reports voided (also
@@ -657,7 +719,8 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
     view(s, { owner = false } = {}) {
       const lostAt = s.ledger.filter((f) => f.op === 'void' && f.external).at(-1)?.at ?? null;
       const short = lostAt && !s.closedAt ? shortfalls(s.plan, s.ledger).map(({ item, cents }) => ({ id: item.id, title: item.title, cents })) : [];
-      const items = s.plan.items.map((i) => ({ ...i, date: dayDate(s.plan.startDate, i.day), money: itemState(s.ledger, i.id) }));
+      const chargedOf = (id) => { const c = s.ledger.filter((f) => f.op === 'capture' && f.itemId === id).at(-1); return c ? { chargedOn: c.day ?? new Date(c.at).toISOString().slice(0, 10), chargedSimulated: Boolean(c.simulated) } : { chargedOn: null, chargedSimulated: false }; };
+      const items = s.plan.items.map((i) => ({ ...i, date: dayDate(s.plan.startDate, i.day), dueOn: itemDueOn(s.plan, i), ...chargedOf(i.id), money: itemState(s.ledger, i.id) }));
       const removed = [...new Set(s.ledger.map((f) => f.itemId).filter((id) => id && id !== '_reserve'))]
         .filter((id) => !s.plan.items.some((i) => i.id === id))
         .map((id) => ({ id, title: Object.values(s.proposals).flatMap((p) => p.actions).find((a) => a.itemId === id)?.title ?? id, money: itemState(s.ledger, id) }));
@@ -687,6 +750,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
         webhooks: owner ? s.webhooks.slice(-8) : [],
         runs: s.runs,
         events: owner ? s.events : s.events.map((e) => (e.kind === 'user' ? { ...e, text: 'The traveler wrote a message.' } : e)),
+        settlement: s.settlement?.onDay ? { onDay: true, today: settleDate(s), realToday: today(), simulated: (s.simDays ?? 0) > 0, simDays: s.simDays ?? 0 } : null,
         holdLost: short.length ? { at: lostAt, short, cents: short.reduce((n, x) => n + x.cents, 0), canRehold: owner } : null,
       };
     },

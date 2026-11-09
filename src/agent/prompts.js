@@ -15,7 +15,7 @@ Rules:
 - At most ${limits.maxItems} items in total. Prefer the few that matter most: lodging, the main transport, 2-4 activities, 1-2 notable meals.
 - category is one of: ${limits.categories.join(', ')}.
 - day is the trip day number starting at 1.
-- prepaid is true only for lodging and for anything the traveler says must be paid in advance.
+- prepaid is true only for something the traveler says must be paid in advance. Everything else is charged on its own day, so leave prepaid false.
 - travelers: use the names the person gave; if none, use "Traveler 1", "Traveler 2" for the stated group size (default 2).
 - participants: names from travelers who share that item (all of them unless the request says otherwise).
 - When the traveler gave a budget, plan for about 80% of the budget: the rest is room for changes later. Never make up an item just to use the rest of it.

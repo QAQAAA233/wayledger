@@ -65,7 +65,8 @@ export function createTripObject({ storage: raw, env, deps = {} }) {
     // The screen shows when the agent will look at the forecast next.
     if (method === 'view' && out.ok) out.v = { ...out.v, nextWakeAt: ((await storage.get('schedule')) ?? []).find((i) => i.kind === 'wake')?.at ?? null };
     // The agent's schedule starts with the first signed limits.
-    if (out.ok && ['confirm', 'approveOrder', 'retry'].includes(method)) { try { await agent.ensureWake(); } catch (e) { console.error(e); } }
+    if (out.ok && ['confirm', 'approveOrder', 'retry'].includes(method)) { try { await agent.ensureWake(); await agent.ensureSettle(); } catch (e) { console.error(e); } }
+    if (out.ok && ['advance', 'closeTrip'].includes(method)) { try { await agent.ensureSettle(); } catch (e) { console.error(e); } }
     return out;
   }
 

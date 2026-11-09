@@ -11,6 +11,8 @@ const SANDBOX_ORDER = fixture('sandbox_create_order.json');
 const SANDBOX = fixture('sandbox_resources.json');
 // What PayPal answers when something is asked of an authorization that was voided from outside (read from the sandbox).
 const VOIDED = fixture('sandbox_voided.json');
+// What PayPal answers when one authorization is captured in parts, the second part final (read from the sandbox).
+const PARTIAL = fixture('sandbox_partial_captures.json');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const cents = (s) => Math.round(Number(s) * 100);
 export { cents };
@@ -24,7 +26,7 @@ export function fakePayPalFetch({ skew = {}, failOn = null, now = () => Date.now
   const res = (status, body) => new Response(body == null ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'paypal-debug-id': 'dbg123' } });
 
   const authBody = (a) => ({ ...clone(SANDBOX.get_authorization.body), id: a.id, status: a.status, amount: a.amount, custom_id: a.customId, create_time: iso(a.created), update_time: iso(now()), expiration_time: iso(a.created + 29 * 86400_000), supplementary_data: { related_ids: { order_id: a.orderId } } });
-  const capBody = (c) => ({ ...clone(SANDBOX.get_capture.body), id: c.id, status: c.status, amount: c.amount, custom_id: c.customId });
+  const capBody = (c) => ({ ...clone(SANDBOX.get_capture.body), id: c.id, status: c.status, amount: c.amount, custom_id: c.customId, final_capture: Boolean(c.finalCapture) });
   const refBody = (r) => ({ id: r.id, status: r.status, amount: r.amount, create_time: iso(r.created), update_time: iso(r.created), note_to_payer: r.note, links: [] });
   const orderBody = (id) => {
     const o = orders.get(id);
@@ -82,14 +84,21 @@ export function fakePayPalFetch({ skew = {}, failOn = null, now = () => Date.now
         if (a.expired) body.details = [{ issue: 'AUTHORIZATION_EXPIRED', description: 'The authorization has expired.' }];
         return res(VOIDED.capture_on_voided.status, body);
       }
+      // a closed authorization (every part captured, or the last part final) takes nothing more: PayPal's own answer
+      if (a.status === 'CAPTURED') return res(PARTIAL.capture_3_10_after_final.status, clone(PARTIAL.capture_3_10_after_final.body));
+      const cents = Math.round(Number(body.amount.value) * 100);
+      if ((a.captured ?? 0) + cents > Math.round(Number(a.amount.value) * 100)) {
+        return res(422, { name: 'UNPROCESSABLE_ENTITY', message: 'The requested action could not be performed, semantically incorrect, or failed business validation.', details: [{ issue: 'MAX_CAPTURE_AMOUNT_EXCEEDED', description: 'Capture amount specified exceeded allowable limit. You can only capture up to the original authorization amount.' }] });
+      }
       const id = `CAP${++n}`;
-      caps.set(id, { id, status: 'COMPLETED', amount: body.amount, authId: a.id, customId: a.customId });
-      a.captured = (a.captured ?? 0) + Math.round(Number(body.amount.value) * 100);
-      a.status = a.captured >= Math.round(Number(a.amount.value) * 100) ? 'CAPTURED' : 'PARTIALLY_CAPTURED';
+      caps.set(id, { id, status: 'COMPLETED', amount: body.amount, authId: a.id, customId: a.customId, finalCapture: Boolean(body.final_capture) });
+      a.captured = (a.captured ?? 0) + cents;
+      a.status = body.final_capture || a.captured >= Math.round(Number(a.amount.value) * 100) ? 'CAPTURED' : 'PARTIALLY_CAPTURED';
       return res(201, { id, status: 'COMPLETED' });
     }
     if ((m = path.match(/^\/v2\/payments\/authorizations\/(\w+)\/void$/))) {
       if (auths.get(m[1]).status === 'VOIDED') return res(VOIDED.void_on_voided.status, clone(VOIDED.void_on_voided.body));
+      if (auths.get(m[1]).status === 'CAPTURED') return res(PARTIAL.void_after_final.status, clone(PARTIAL.void_after_final.body));
       auths.get(m[1]).status = 'VOIDED';
       return res(204, null);
     }
@@ -118,7 +127,7 @@ export function fakePayPalFetch({ skew = {}, failOn = null, now = () => Date.now
 export const SAMPLE_PLAN = {
   title: 'Lisbon long weekend', destination: 'Lisbon', budget: 1200, budgetQuote: 'Budget $1,200 total', travelers: ['Ana', 'Ben', 'Cy'],
   items: [
-    { day: 1, title: 'Alfama apartment (3 nights)', category: 'lodging', amount: 540, participants: ['Ana', 'Ben', 'Cy'] },
+    { day: 1, title: 'Alfama apartment (3 nights)', category: 'lodging', amount: 540, participants: ['Ana', 'Ben', 'Cy'], prepaid: true }, // the traveler said the flat must be paid in advance
     { day: 2, title: 'Sunset boat tour', category: 'activity', amount: 180, participants: ['Ana', 'Ben', 'Cy'] },
     { day: 3, title: 'Sintra day trip', category: 'transport', amount: 120, participants: ['Ana', 'Ben'] },
   ],

@@ -57,7 +57,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .tripbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 12px 0 14px; }
 .tripbar h1 { font-size: clamp(1.4rem, 4vw, 2rem); }
 .tripbar .sub { color: var(--muted); }
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .stat small { color: var(--muted); display: block; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .stat b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
@@ -125,6 +125,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .notice.waits ul { margin: 4px 0 0; padding-left: 18px; }
 .notice.viewonly { margin: 0 0 12px; }
 .budget .why { color: var(--muted); margin-left: 6px; }
+.notice.simclock { margin: 0 0 14px; background: var(--held-bg); color: var(--held); }
 .notice.lost { margin: 0 0 14px; background: var(--danger-bg); color: var(--danger); }
 .agentnote { margin: 10px 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: .92rem; }
 .agentnote b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }

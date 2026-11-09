@@ -32,8 +32,8 @@ export function describeAction(a) {
   switch (a.type) {
     case 'hold': if (a.itemId === '_buffer') return `Hold ${usd(a.cents)} more as a buffer for changes (released at the end if unused)`; return a.captureAfter ? `Charge ${usd(a.cents)} now for ${a.title} (paid in advance)` : `Hold ${usd(a.cents)} with PayPal for ${a.title} (charged when the trip closes)`;
     case 'allocate': return `Set aside ${usd(a.cents)} of your trip hold for ${a.title}`;
-    case 'release': return `Free ${usd(a.cents)} of your trip hold that was set aside for ${a.title}`;
-    case 'capture': return `Charge ${usd(a.cents)} for ${a.title}`;
+    case 'release': return String(a.why ?? '').startsWith('not charged') ? `Do not charge ${usd(a.cents)} for ${a.title}: it has not happened yet` : `Free ${usd(a.cents)} of your trip hold that was set aside for ${a.title}`;
+    case 'capture': return a.settle ? `Charge ${usd(a.cents)} for ${a.title}: it is happening today` : `Charge ${usd(a.cents)} for ${a.title}`;
     case 'void': return `Release the unused ${usd(a.cents)} of your trip hold`;
     case 'refund': return `Refund ${usd(a.cents)} for ${a.title} to your PayPal`;
     default: return a.title;
@@ -46,14 +46,15 @@ export function paypalEffect(actions) {
   const chargeCents = sum(chargesNow);
   const holdCents = sum((a) => a.type === 'hold' && !a.captureAfter);
   const refundCents = sum((a) => a.type === 'refund');
-  const voidCents = sum((a) => a.type === 'void');
+  // a final charge makes PayPal release the rest of the hold: that is a release too
+  const voidCents = sum((a) => a.type === 'void') + actions.filter((a) => a.type === 'capture' && a.finalCapture).reduce((s, a) => s + (a.releasesCents ?? 0), 0);
   return { chargeCents, holdCents, refundCents, voidCents, mostCanMoveCents: chargeCents + holdCents + refundCents, touchesPayPal: chargeCents + holdCents + refundCents + voidCents > 0 };
 }
 
 export function describeEffect(actions) {
   if (actions.length === 0) return 'No money moves.';
   const e = paypalEffect(actions);
-  if (!e.touchesPayPal) return 'This change stays inside your trip hold. PayPal does not move until you close the trip.';
+  if (!e.touchesPayPal) return 'This change stays inside your trip hold. Nothing is charged before the day of each item.';
   const parts = [];
   if (e.chargeCents) parts.push(`charge ${usd(e.chargeCents)}`);
   if (e.refundCents) parts.push(`refund ${usd(e.refundCents)}`);
@@ -64,9 +65,9 @@ export function describeEffect(actions) {
 }
 
 export function proposalSummary(kind, oldPlan, newPlan) {
-  if (kind === 'checkout') return 'Place one hold with PayPal for the whole trip and set money aside for each item. Items paid in advance are charged now.';
+  if (kind === 'checkout') return 'Place one hold with PayPal for the whole trip and set money aside for each item. Nothing is charged now except what you said must be paid in advance: each item is charged on its day, and what is not used is released.';
   if (kind === 'rehold') return 'Place a new hold with PayPal for the items whose hold was cancelled, and set money aside for each. Items paid in advance are charged now.';
-  if (kind === 'close') return 'Close the trip: charge what is still held and release what is left of your trip hold.';
+  if (kind === 'close') return 'Close the trip: charge what has already happened and release the rest of your trip hold. What did not happen is not charged.';
   const lines = oldPlan && newPlan ? describeEdit(oldPlan, newPlan) : [];
   return lines.length ? `${lines.join('. ')}.` : 'Update the plan.';
 }

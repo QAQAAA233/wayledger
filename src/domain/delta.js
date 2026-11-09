@@ -1,4 +1,5 @@
 import { itemState, reserves } from './ledger.js';
+import { dayDate } from './plan.js';
 
 // Deterministic money delta between the current plan and a staged plan.
 // One PayPal authorization is a trip hold; each item has money set aside for it under a hold.
@@ -132,41 +133,76 @@ export function checkoutActions(plan, ledger, bufferCents = 0) {
   return actions;
 }
 
-// Close trip: charge every remaining held item in the plan, then void any unused hold in PayPal.
-export function closeActions(plan, ledger) {
+// Pay only for what happens. One PayPal authorization covers the whole trip; each item is charged on its day (a partial
+// capture of just that item), the last charge on a hold is marked final so PayPal releases the rest by itself, and what
+// never happened is never charged. (PayPal's own answers for this are in test/fixtures/sandbox_partial_captures.json.)
+
+// The day an item happens: the date of its trip day, or null when the trip has no start date.
+export const itemDueOn = (plan, item) => dayDate(plan.startDate, item.day);
+
+// Has the item happened by `today` (an ISO date)? An item without a date, or a closing without a calendar, counts as having happened.
+export const isDue = (plan, item, today) => {
+  const d = itemDueOn(plan, item);
+  return d == null || today == null || d <= today;
+};
+
+// Every item that has money set aside on a hold that is still open: [{ item, authId, cents }].
+function heldAllocations(plan, ledger) {
+  const open = new Set(reserves(ledger).filter((r) => r.open).map((r) => r.id));
+  return plan.items.flatMap((item) => itemState(ledger, item.id).openAuths.filter((a) => open.has(a.id) && a.cents > 0).map((a) => ({ item, authId: a.id, cents: a.cents })));
+}
+
+// One capture per item that is due. The last one on a hold is final when nothing else stays on that hold (`closing`: everything
+// else was released first, so it always is), and then it says how much PayPal releases with it.
+function captureActions(plan, ledger, held, due, { settle }) {
+  const byAuth = new Map();
+  for (const h of due) { if (!byAuth.has(h.authId)) byAuth.set(h.authId, []); byAuth.get(h.authId).push(h); }
+  const res = new Map(reserves(ledger).map((r) => [r.id, r]));
   const actions = [];
-  for (const item of plan.items) {
-    const st = itemState(ledger, item.id);
-    for (const oa of st.openAuths) {
-      if (oa.cents > 0) {
-        actions.push({
-          type: 'capture',
-          itemId: item.id,
-          title: item.title,
-          cents: oa.cents,
-          authId: oa.id,
-          why: 'settle held item on trip close',
-        });
-      }
+  for (const [authId, list] of byAuth) {
+    const staysOnHold = held.filter((h) => h.authId === authId && !due.includes(h)).length;
+    list.forEach((h, i) => {
+      const a = { type: 'capture', itemId: h.item.id, title: h.item.title, cents: h.cents, authId, why: settle ? 'charged on its day' : 'settle an item that has happened' };
+      if (settle) { a.settle = true; a.dueOn = itemDueOn(plan, h.item); }
+      a.finalCapture = i === list.length - 1 && (settle ? staysOnHold === 0 : true);
+      if (a.finalCapture) { const r = res.get(authId); a.releasesCents = Math.max(0, r.authorizedCents - r.capturedCents - list.reduce((n, x) => n + x.cents, 0)); }
+      actions.push(a);
+    });
+  }
+  return actions;
+}
+
+// What the calendar charges today: every dated item whose day has come and that still has money on hold. When nothing is left on
+// a hold and every day of the trip has come, the rest of that hold is released.
+export function settleActions(plan, ledger, today) {
+  const held = heldAllocations(plan, ledger);
+  const due = held.filter((h) => itemDueOn(plan, h.item) != null && isDue(plan, h.item, today));
+  const actions = captureActions(plan, ledger, held, due, { settle: true });
+  const dates = plan.items.map((i) => itemDueOn(plan, i));
+  const lastDay = dates.every((x) => x != null) ? [...dates].sort().at(-1) : null;
+  if (lastDay && lastDay <= today) {
+    const capturing = new Set(actions.map((a) => a.authId));
+    for (const r of reserves(ledger)) {
+      if (!r.open || capturing.has(r.id) || held.some((h) => h.authId === r.id)) continue;
+      const leftover = r.authorizedCents - r.capturedCents;
+      if (leftover > 0) actions.push({ type: 'void', itemId: '_reserve', title: `Unused trip hold (${r.id})`, cents: leftover, authId: r.id, settle: true, dueOn: lastDay, why: 'the trip is over: release what was never charged' });
     }
   }
+  return actions;
+}
+
+// Close trip: what has happened is charged, what has not is released, and the rest of the hold goes back to the buyer.
+export function closeActions(plan, ledger, today = null) {
+  const held = heldAllocations(plan, ledger);
+  const due = held.filter((h) => isDue(plan, h.item, today));
+  const actions = held.filter((h) => !due.includes(h)).map((h) => ({ type: 'release', itemId: h.item.id, title: h.item.title, cents: h.cents, authId: h.authId, why: 'not charged: it has not happened yet' }));
+  const captures = captureActions(plan, ledger, held, due, { settle: false });
+  actions.push(...captures);
+  const capturing = new Set(captures.map((a) => a.authId));
   for (const r of reserves(ledger)) {
-    if (!r.open) continue;
-    const capturingNow = actions.filter((a) => a.type === 'capture' && a.authId === r.id).reduce((s, a) => s + a.cents, 0);
-    const leftover = r.authorizedCents - r.capturedCents - capturingNow;
-    if (leftover > 0) {
-      actions.push({
-        type: 'void',
-        itemId: '_reserve',
-        title: `Unused trip hold (${r.id})`,
-        cents: leftover,
-        authId: r.id,
-        why: 'release the remaining unused trip hold in PayPal',
-      });
-    } else if (leftover === 0 && capturingNow > 0) {
-      const lastCap = [...actions].reverse().find((a) => a.type === 'capture' && a.authId === r.id);
-      if (lastCap) lastCap.finalCapture = true;
-    }
+    if (!r.open || capturing.has(r.id)) continue;
+    const leftover = r.authorizedCents - r.capturedCents;
+    if (leftover > 0) actions.push({ type: 'void', itemId: '_reserve', title: `Unused trip hold (${r.id})`, cents: leftover, authId: r.id, why: 'release the remaining unused trip hold in PayPal' });
   }
   return actions;
 }

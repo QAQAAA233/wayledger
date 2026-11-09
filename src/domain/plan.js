@@ -13,8 +13,8 @@ export const dayDate = (startDate, day) => (isIsoDate(startDate) ? addDays(start
 export const lastDay = (plan) => Math.max(1, ...plan.items.map((i) => i.day));
 export const tripEndDate = (plan) => (isIsoDate(plan.startDate) ? addDays(plan.startDate, lastDay(plan) - 1) : null);
 
-// Lodging is prepaid by default; any item can be marked prepaid or not. Prepaid items are charged when booked,
-// everything else stays a hold until the trip closes, so a change can usually release a hold instead of refunding.
+// Nothing is prepaid unless the traveler said it must be paid in advance. A prepaid item is charged when it is booked; every
+// other item stays on the hold and is charged on its own day, so a change releases a hold instead of refunding a charge.
 function normItem(raw, travelers, id) {
   const title = clean(raw.title, 80);
   if (!title) throw new PlanError('Every item needs a title.');
@@ -29,7 +29,7 @@ function normItem(raw, travelers, id) {
   if (!Number.isInteger(day) || day < 1 || day > LIMITS.maxDays) throw new PlanError(`"${clean(raw.title, 40)}" has an invalid day.`);
   let participants = Array.isArray(raw.participants) ? raw.participants.map((p) => clean(p, 40)).filter((p) => travelers.includes(p)) : [];
   if (participants.length === 0) participants = [...travelers];
-  const prepaid = amountCents > 0 && (raw.prepaid === undefined || raw.prepaid === null ? category === 'lodging' : Boolean(raw.prepaid));
+  const prepaid = amountCents > 0 && Boolean(raw.prepaid);
   const item = { id, day, title, category, amountCents, participants, prepaid };
   if (raw.placeId) item.placeId = clean(raw.placeId, 60);
   if (raw.amountBasis) item.amountBasis = clean(raw.amountBasis, 40);

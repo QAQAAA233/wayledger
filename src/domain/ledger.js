@@ -86,8 +86,12 @@ export function reserves(ledger) {
       if (oa && oa.cents > 0) heldItems.push({ itemId, cents: oa.cents });
     }
     const heldCents = heldItems.reduce((s, h) => s + h.cents, 0);
-    const unusedCents = voided ? 0 : Math.max(0, authorizedCents - capturedCents - heldCents);
-    const open = !voided && capturedCents < authorizedCents;
+    // a final capture closes the authorization: PayPal releases what is left by itself
+    const finalCaptured = captures.some((c) => c.final);
+    const closed = voided || finalCaptured;
+    const unusedCents = closed ? 0 : Math.max(0, authorizedCents - capturedCents - heldCents);
+    const open = !closed && capturedCents < authorizedCents;
+    const releasedCents = closed ? Math.max(0, authorizedCents - capturedCents) : 0;
 
     return {
       id: authId,
@@ -100,6 +104,8 @@ export function reserves(ledger) {
       unusedCents,
       voided,
       voidedCents,
+      finalCaptured,
+      releasedCents,
       open,
       heldItems,
       captures,
@@ -112,7 +118,7 @@ export function reserves(ledger) {
 // already closed, so telling it twice records it once.
 export function holdLostFacts(ledger, authId, at) {
   const r = reserves(ledger).find((x) => x.id === authId);
-  if (!r || r.voided) return [];
+  if (!r || !r.open) return [];
   return [
     ...r.heldItems.map((h) => ({ op: 'release', id: authId, itemId: h.itemId, cents: h.cents, status: 'RELEASED', at, external: true })),
     { op: 'void', id: authId, itemId: '_reserve', cents: r.authorizedCents - r.capturedCents, status: 'VOIDED', at, external: true },
@@ -147,6 +153,7 @@ export function ledgerTotals(ledger) {
     paidCents: states.reduce((a, s) => a + s.paidCents, 0),
     refundedCents: states.reduce((a, s) => a + s.refundedCents, 0),
     unusedReserveCents: res.reduce((a, r) => a + r.unusedCents, 0),
+    releasedCents: res.reduce((a, r) => a + r.releasedCents, 0),
     authorizedCents: res.reduce((a, r) => a + r.authorizedCents, 0),
   };
 }
@@ -182,6 +189,9 @@ export function reconcile(ledger, remote, plan = null) {
     } else if (r.voided) {
       expectStatus = 'VOIDED';
       statusOk = remoteStatus === 'VOIDED';
+    } else if (r.finalCaptured) {
+      expectStatus = 'CAPTURED';
+      statusOk = remoteStatus === 'CAPTURED';
     } else if (r.capturedCents >= r.authorizedCents) {
       expectStatus = 'CAPTURED';
       statusOk = ['CAPTURED', 'PARTIALLY_CAPTURED'].includes(remoteStatus);
