@@ -297,7 +297,6 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
   // plan: the agent comparing options, submitEdit, and a refreshed proposal.
   function assess(s, newPlan, { humanOnly = false } = {}) {
     const booked = s.ledger.length > 0;
-    const actions = booked ? diffToActions(s.plan, newPlan, s.ledger) : [];
     const losses = [];
     const lose = (item, newAmountCents) => {
       const fact = s.policies.find((f) => f.itemId === item.id);
@@ -313,6 +312,7 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       if (!n) lose(it, null);
       else if (n.amountCents < it.amountCents) lose(it, n.amountCents);
     }
+    const actions = booked ? diffToActions(s.plan, newPlan, s.ledger, { losses }) : [];
     const operatorLossCents = losses.reduce((n, l) => n + (l.lossCents ?? 0), 0);
     const split = splitChanged(s.plan, newPlan);
     const cancelledCents = s.plan.items.filter((i) => !newById.has(i.id)).reduce((n, i) => n + i.amountCents, 0);

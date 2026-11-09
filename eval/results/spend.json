@@ -1,6 +1,6 @@
 {
- "neurons": 270959.77573464136,
- "calls": 2447,
+ "neurons": 285851.68883202295,
+ "calls": 2880,
  "byTag": {
   "dev0": {
    "runs": 28,
@@ -90,13 +90,13 @@
    }
   },
   "swarm_eval": {
-   "neurons": 73170.2758140564,
-   "calls": 2435,
+   "neurons": 88062.18891143799,
+   "calls": 2868,
    "byModel": {
-    "@cf/google/gemma-4-26b-a4b-it": 73170.2758140564
+    "@cf/google/gemma-4-26b-a4b-it": 88062.18891143799
    }
   }
  },
- "usd": 2.9806,
+ "usd": 3.1444,
  "capUsd": 10
 }

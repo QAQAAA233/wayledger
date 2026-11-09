@@ -209,3 +209,35 @@ test('finding 2: lowering a price is not cancelling, so good news from an operat
   assert.equal(out.outcome, 'executed');
   assert.equal(state(ctx).mandate.used.cancelledCents, 0);
 });
+
+test('non-refundable item held on trip: removing it via confirmed proposal does not refund, does not release the hold (operator keeps it), and proposal effect matches', async () => {
+  const ctx = setup();
+  ctx.clock.t = Date.parse('2026-05-01T09:00:00Z');
+  await booked(ctx, LIMITS(ctx));
+  const sintraId = itemId(ctx, 'Sintra'); // $120.00, held
+  await ctx.engine.addDocument('Sintra day trip: non-refundable from the moment of booking.');
+  await ctx.engine.recordPolicy({ docId: 'd1', itemId: sintraId, quote: 'Sintra day trip: non-refundable from the moment of booking.', nonRefundable: true });
+
+  const out = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: sintraId }], agentNote: 'cancel sintra' });
+  assert.equal(out.outcome, 'proposed');
+
+  const p = active(ctx);
+  // Verify proposal effect does not promise a refund or release
+  assert.equal(out.effect.refundCents, 0, 'proposal effect should have 0 refund');
+  assert.equal(out.effect.voidCents, 0, 'proposal effect should not void/release the non-refundable hold');
+  assert.equal(p.actions.filter((a) => a.type === 'refund' || a.type === 'release').length, 0, 'no refund or release action for non-refundable item');
+
+  // Now confirm the proposal
+  await ctx.engine.confirm(p.id, p.digest);
+
+  // Verify ledger after confirm
+  const sAfter = state(ctx);
+  const releasedSintra = sAfter.ledger.filter((f) => f.op === 'release' && f.itemId === sintraId);
+  const refundedSintra = sAfter.ledger.filter((f) => f.op === 'refund' && f.itemId === sintraId);
+  assert.equal(releasedSintra.length, 0, 'no release fact for non-refundable held item');
+  assert.equal(refundedSintra.length, 0, 'no refund fact for non-refundable item');
+
+  const st = itemState(sAfter.ledger, sintraId);
+  assert.equal(st.refundedCents, 0, 'nothing was refunded to the traveler');
+});
+

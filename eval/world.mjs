@@ -119,10 +119,28 @@ ${s0.documents.length ? s0.documents.map((d) => `[${d.id}] ${d.text}`).join('\n'
   const policyDef = tools.find((t) => t.name === 'record_policy');
   const oneCall = { ...submitDef, description: "Hand over your final choice. It must carry its basis in authority. Code decides what happens: inside the traveler's limits it is carried out, otherwise it becomes a proposal the traveler confirms. Ends the task. Fill remove, reprice, update, add or setTravelers, plus summary, reason, authority and terms.", parameters: { ...submitDef.parameters, properties: { ...submitDef.parameters.properties, terms: { type: 'array', maxItems: 8, items: policyDef.parameters, description: 'What the pasted booking terms say about each item you cancel or lower.' } } } };
   const defs = toolDefs([oneCall, ...tools.filter((t) => ['ask_traveler', 'no_change'].includes(t.name))]);
-  const res = await callModel({ run, model, messages: [{ role: 'system', content: BASELINE_SYSTEM }, { role: 'user', content: user }], tools: defs, timeoutMs: 90_000 });
+  let res = await callModel({ run, model, messages: [{ role: 'system', content: BASELINE_SYSTEM }, { role: 'user', content: user }], tools: defs, timeoutMs: 90_000 });
   const stats = { modelCalls: 1, neurons: Math.round(neuronsOf(model, res.usage) * 10) / 10, ms: res.ms, model };
-  const call = res.calls.find((c) => ['submit_edit', 'ask_traveler', 'no_change'].includes(c.name));
-  if (!call) return { final: { kind: 'stopped', why: 'The model did not choose an action.' }, trace: [], stats };
+  let call = res.calls.find((c) => ['submit_edit', 'ask_traveler', 'no_change'].includes(c.name));
+  if (!call) {
+    const nudge = 'Finish now: call submit_edit, or ask_traveler, or no_change. Do not answer in plain text.';
+    const retryRes = await callModel({
+      run,
+      model,
+      messages: [
+        { role: 'system', content: BASELINE_SYSTEM },
+        { role: 'user', content: user },
+        { role: 'assistant', content: res.text || 'no_change' },
+        { role: 'user', content: nudge },
+      ],
+      tools: defs,
+      timeoutMs: 90_000,
+    });
+    stats.modelCalls++;
+    stats.neurons += Math.round(neuronsOf(model, retryRes.usage) * 10) / 10;
+    call = retryRes.calls.find((c) => ['submit_edit', 'ask_traveler', 'no_change'].includes(c.name));
+    if (!call) return { final: { kind: 'stopped', why: 'The model did not choose an action.' }, trace: [], stats };
+  }
   const parsed = parseArgs(call.raw);
   if (call.name !== 'submit_edit') { const tool = tools.find((t) => t.name === call.name); if (parsed.ok) { const p = { ...parsed.value }; for (const [k, sch] of Object.entries(tool.parameters.properties)) if (typeof p[k] === 'string' && sch.maxLength) p[k] = p[k].slice(0, sch.maxLength); parsed.value = p; } const out = await runTool(tools, call, parsed, ctx); return { final: out.final ?? { kind: 'stopped', why: JSON.stringify(out.result) }, trace: [], stats }; }
   if (!parsed.ok) return { final: { kind: 'stopped', why: `malformed arguments: ${parsed.error}` }, trace: [], stats };

@@ -18,10 +18,11 @@ export const PAYPAL_CHARGE_TYPES = ['hold', 'capture', 'refund'];
 // of an action is told, judged or gated.
 export const chargesNow = (a) => a.type === 'capture' || ((a.type === 'hold' || a.type === 'allocate') && Boolean(a.captureAfter));
 
-export function diffToActions(oldPlan, newPlan, ledger) {
+export function diffToActions(oldPlan, newPlan, ledger, { losses = [] } = {}) {
   const actions = [];
   const oldById = new Map(oldPlan.items.map((i) => [i.id, i]));
   const newById = new Map(newPlan.items.map((i) => [i.id, i]));
+  const lossByItem = new Map(losses.map((l) => [l.itemId, l.lossCents ?? 0]));
 
   const availByAuth = new Map(
     reserves(ledger)
@@ -40,12 +41,25 @@ export function diffToActions(oldPlan, newPlan, ledger) {
     }
   };
 
-  const releaseAll = (item, st, why) => {
-    for (const a of st.openAuths) {
-      actions.push({ type: 'release', itemId: item.id, title: item.title, cents: a.cents, authId: a.id, why });
-      availByAuth.set(a.id, (availByAuth.get(a.id) ?? 0) + a.cents);
+  const releaseAll = (item, st, why, retainedCents = 0) => {
+    let remLoss = retainedCents;
+    const paidToRetain = Math.min(st.paidCents, remLoss);
+    remLoss -= paidToRetain;
+    const paidToRefund = Math.max(0, st.paidCents - paidToRetain);
+    if (paidToRefund > 0) {
+      refund(item, st, paidToRefund, why);
     }
-    refund(item, st, st.paidCents, why);
+    const heldToRelease = Math.max(0, st.heldCents - remLoss);
+    let leftToRelease = heldToRelease;
+    for (const a of st.openAuths) {
+      if (leftToRelease <= 0) break;
+      const cut = Math.min(a.cents, leftToRelease);
+      if (cut > 0) {
+        actions.push({ type: 'release', itemId: item.id, title: item.title, cents: cut, authId: a.id, why });
+        availByAuth.set(a.id, (availByAuth.get(a.id) ?? 0) + cut);
+        leftToRelease -= cut;
+      }
+    }
   };
 
   const assignQuota = (item, cents, captureAfter, baseWhy) => {
@@ -77,14 +91,16 @@ export function diffToActions(oldPlan, newPlan, ledger) {
   for (const old of oldPlan.items) {
     const st = itemState(ledger, old.id);
     const now = newById.get(old.id);
+    const itemLoss = lossByItem.get(old.id) ?? 0;
     if (!now) {
-      releaseAll(old, st, 'removed from the plan');
+      releaseAll(old, st, 'removed from the plan', itemLoss);
     } else if (now.amountCents === 0 && st.status !== 'planned') {
-      releaseAll(now, st, 'now free');
+      releaseAll(now, st, 'now free', itemLoss);
     } else if (now.amountCents !== old.amountCents) {
       if (st.heldCents > 0) {
         if (now.amountCents < st.heldCents) {
-          let toRelease = st.heldCents - now.amountCents;
+          const drop = st.heldCents - now.amountCents;
+          let toRelease = Math.max(0, drop - itemLoss);
           for (const a of st.openAuths) {
             if (toRelease <= 0) break;
             const cut = Math.min(a.cents, toRelease);
@@ -96,8 +112,11 @@ export function diffToActions(oldPlan, newPlan, ledger) {
           assignQuota(now, now.amountCents - st.heldCents, now.prepaid, 'price rose');
         }
       } else if (st.paidCents > 0) {
-        if (now.amountCents < st.paidCents) refund(now, st, st.paidCents - now.amountCents, 'price dropped: refund the difference');
-        else if (now.amountCents > st.paidCents) assignQuota(now, now.amountCents - st.paidCents, true, 'price rose: charge the difference');
+        if (now.amountCents < st.paidCents) {
+          const drop = st.paidCents - now.amountCents;
+          const refundCents = Math.max(0, drop - itemLoss);
+          if (refundCents > 0) refund(now, st, refundCents, 'price dropped: refund the difference');
+        } else if (now.amountCents > st.paidCents) assignQuota(now, now.amountCents - st.paidCents, true, 'price rose: charge the difference');
       } else if (now.amountCents > 0 && ledger.length > 0) {
         // nothing held or paid yet (it was free, or its money was freed): it gets money set aside like a new item
         assignQuota(now, now.amountCents, now.prepaid, 'now has a price');
