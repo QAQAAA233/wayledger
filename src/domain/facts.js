@@ -62,9 +62,12 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 export function dateInQuote(iso, quote) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
   if (!m) return false;
-  const [month, day] = [Number(m[2]), Number(m[3])];
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const nums = (String(quote).match(/\d+/g) ?? []).map(Number);
   const q = String(quote).toLowerCase();
+  // a sentence that names a year is about that year
+  const years = (String(quote).match(/\b(?:19|20)\d{2}\b/g) ?? []).map(Number);
+  if (years.length && !years.includes(year)) return false;
   return nums.includes(day) && (q.includes(MONTHS[month - 1]) || nums.includes(month));
 }
 

@@ -214,7 +214,7 @@ export function createTools() {
 
   add({
     name: 'record_policy',
-    description: 'Record what the terms say about one plan item, copying the sentence exactly (the host checks that it is really in the document and that any date or percentage you report is in that sentence). Use freeCancelUntil for a free-cancellation deadline, with penaltyPercent for what is charged after it (100 when the sentence says non-refundable after that). Use nonRefundable only when the sentence says there is never any free cancellation, with no date. If no sentence mentions the item, record none: true.',
+    description: 'Record what the terms say about one plan item, copying the sentence exactly (the host checks that it is really in the document and that any date or percentage you report is in that sentence). Use freeCancelUntil for a free-cancellation deadline, with penaltyPercent for what is charged after it (100 when the sentence says non-refundable after that). Use freeCancelHoursBefore or freeCancelDaysBefore instead when the sentence counts back from the start ("up to 48 hours before"): copy the number and unit the sentence itself uses. Use nonRefundable only when the sentence says there is never any free cancellation, with no date. If no sentence mentions the item, record none: true.',
     parameters: {
       type: 'object',
       properties: {
@@ -222,7 +222,9 @@ export function createTools() {
         docId: { type: 'string', description: 'The document the sentence is in.' },
         quote: { type: 'string', description: 'The exact sentence copied from the document.', maxLength: 300 },
         freeCancelUntil: { type: 'string', description: 'Date and optional time in the sentence, like 2026-05-06 or 2026-05-06T12:00.' },
-        penaltyPercent: { type: 'number', description: 'Percent of the price charged when cancelling after the free period (100 = non-refundable).' },
+        freeCancelHoursBefore: { type: 'number', description: 'Free cancellation is possible up to this many hours before the item starts, as the sentence states it.' },
+        freeCancelDaysBefore: { type: 'number', description: 'Free cancellation is possible up to this many days before the item starts, as the sentence states it.' },
+        penaltyPercent: { type: 'number', description: 'Percent of the price charged when cancelling after the free period (100 = non-refundable). If the sentence says what comes back ("80% refund"), the penalty is what is left (20).' },
         nonRefundable: { type: 'boolean', description: 'True only when it can never be cancelled for free from the moment of booking and the sentence has no deadline date.' },
         none: { type: 'boolean', description: 'True when no sentence in the documents mentions this item.' },
       },
