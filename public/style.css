@@ -94,7 +94,7 @@ textarea:focus, input:focus, button:focus-visible { outline: 3px solid var(--acc
 .acts { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; }
 .acts li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: .92rem; }
 .acts .k { font-weight: 700; margin-right: 6px; }
-.acts .hold .k { color: var(--held); } .acts .void .k { color: var(--released); } .acts .refund .k { color: var(--refunded); }
+.acts .hold .k, .acts .allocate .k { color: var(--held); } .acts .void .k, .acts .release .k { color: var(--released); } .acts .capture .k { color: var(--paid); } .acts .refund .k { color: var(--refunded); }
 .acts li.done { opacity: .6; }
 .sumline { display: flex; justify-content: space-between; font-size: .9rem; color: var(--muted); margin: 6px 0; flex-wrap: wrap; gap: 6px; }
 .sumline b { color: var(--ink); font-variant-numeric: tabular-nums; }

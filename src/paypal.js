@@ -62,48 +62,33 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
       return { orderId: order.id, status: order.status };
     },
 
-    // The buyer has approved in the PayPal popup; this places the holds.
+    // The buyer has approved in the PayPal popup; this places the Trip Reserve authorization.
     async authorizeOrder(orderId, { requestId, proposalId }) {
       const order = await call('POST', `/v2/checkout/orders/${orderId}/authorize`, undefined, requestId);
       let fullOrder = null;
-      const facts = [];
-      for (let i = 0; i < (order.purchase_units ?? []).length; i++) {
-        const pu = order.purchase_units[i];
-        let items = pu.items;
-        if (!items) {
-          fullOrder ??= await call('GET', `/v2/checkout/orders/${orderId}`);
-          items = fullOrder.purchase_units?.[i]?.items;
-        }
-        for (const a of pu.payments?.authorizations ?? []) {
-          const full = await call('GET', `/v2/payments/authorizations/${a.id}`);
-          if (items?.length) {
-            const authCents = toCents(full.amount.value);
-            const itemsSum = items.reduce((s, it) => s + toCents(it.unit_amount.value), 0);
-            items.forEach((it, idx) => {
-              const cents = toCents(it.unit_amount.value) + (idx === 0 ? authCents - itemsSum : 0);
-              facts.push({ ...fact('authorize', it.sku, full, { orderId, proposalId }), cents });
-            });
-          } else {
-            facts.push(fact('authorize', pu.reference_id, full, { orderId, proposalId }));
-          }
-        }
+      const pu = order.purchase_units?.[0];
+      const auth = pu?.payments?.authorizations?.[0];
+      if (!auth) throw new PayPalError('PayPal did not return any authorization. The buyer may not have approved the order.', { details: order });
+
+      let items = pu.items;
+      if (!items) {
+        fullOrder = await call('GET', `/v2/checkout/orders/${orderId}`);
+        items = fullOrder.purchase_units?.[0]?.items;
       }
-      if (facts.length === 0) throw new PayPalError('PayPal did not return any authorization. The buyer may not have approved the order.', { details: order });
-      return facts;
+      const full = await call('GET', `/v2/payments/authorizations/${auth.id}`);
+      const authFact = fact('authorize', '_reserve', full, { orderId, proposalId });
+      const itemBreakdown = items?.map((it) => ({ itemId: it.sku, cents: toCents(it.unit_amount.value) })) ?? null;
+      return { authFact, itemBreakdown };
     },
 
-    async capture(authId, itemId, cents, { requestId, proposalId }) {
-      const c = await call('POST', `/v2/payments/authorizations/${authId}/capture`, { amount: amount(cents), final_capture: false }, requestId);
+    async capture(authId, itemId, cents, { requestId, proposalId, finalCapture = false }) {
+      const c = await call('POST', `/v2/payments/authorizations/${authId}/capture`, { amount: amount(cents), final_capture: Boolean(finalCapture) }, requestId);
       const full = await call('GET', `/v2/payments/captures/${c.id}`);
       return fact('capture', itemId, full, { parentId: authId, proposalId });
     },
 
     async voidAuthorization(authId, itemId, { requestId, proposalId, cents }) {
-      try {
-        await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId);
-      } catch (e) {
-        if (e.details?.[0]?.issue !== 'AUTHORIZATION_ALREADY_VOIDED') throw e;
-      }
+      await call('POST', `/v2/payments/authorizations/${authId}/void`, undefined, requestId);
       const full = await call('GET', `/v2/payments/authorizations/${authId}`);
       return { ...fact('void', itemId, full, { proposalId }), cents: cents ?? toCents(full.amount.value) };
     },
@@ -114,11 +99,11 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
       return fact('refund', itemId, full, { parentId: captureId, proposalId });
     },
 
-    // Used by reconcile: what does PayPal say right now about every id in the ledger?
+    // Used by reconcile: what does PayPal say right now about every PayPal id in the ledger?
     async remoteState(ledger) {
       const out = {};
       for (const f of ledger) {
-        if (f.op === 'void' || out[f.id]) continue;
+        if (!['authorize', 'capture', 'refund'].includes(f.op) || out[f.id]) continue;
         const path = f.op === 'authorize' ? `/v2/payments/authorizations/${f.id}` : f.op === 'capture' ? `/v2/payments/captures/${f.id}` : `/v2/payments/refunds/${f.id}`;
         try {
           const o = await call('GET', path);

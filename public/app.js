@@ -7,7 +7,7 @@ let timer = null;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const usd = (c) => (c / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const STATUS = { planned: 'Planned', held: 'Held', paid: 'Paid', released: 'Released', refunded: 'Refunded', 'part-refunded': 'Part refunded' };
-const OPS = { authorize: 'Hold', capture: 'Charge', void: 'Release hold', refund: 'Refund' };
+const OPS = { authorize: 'Trip reserve', allocate: 'Allocate quota', release: 'Free quota', capture: 'Charge', void: 'Void reserve', refund: 'Refund' };
 
 const SAMPLE_TRIPS = [
   'Three friends - Ana, Ben and Cy - 4 days in Lisbon in May. Budget $1,200 total. We want a flat, a sunset boat tour and a Sintra day trip.',
@@ -57,9 +57,14 @@ function sendChange(text) {
   return go();
 }
 
+function closeTrip() {
+  const go = () => run('Preparing trip close & settlement proposal...', async () => setTrip(await api(`/trips/${S.trip.id}/close`, 'POST')), go);
+  return go();
+}
+
 function confirmRelease() {
   const p = S.trip.proposal;
-  const go = () => run('Confirming and talking to PayPal...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/confirm`, 'POST', { digest: p.digest })), go);
+  const go = () => run('Confirming and updating the ledger...', async () => setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/confirm`, 'POST', { digest: p.digest })), go);
   return go();
 }
 
@@ -70,7 +75,7 @@ function retryProposal() {
 }
 
 async function verify() {
-  S.busy = 'Asking PayPal for the current state of every record...'; render();
+  S.busy = 'Asking PayPal for the current state of every authorization, capture and refund...'; render();
   try { S.recon = await api(`/trips/${S.trip.id}/reconcile`); S.error = null; }
   catch (e) { S.error = e; }
   S.busy = null; render();
@@ -104,7 +109,7 @@ async function mountPayPal() {
         } catch (e) { S.error = e; render(); throw e; }
       },
       onApprove: async (data) => {
-        S.busy = 'PayPal approved. Placing the holds and applying the change...'; render();
+        S.busy = 'PayPal approved. Placing the trip reserve, allocating quotas and applying the change...'; render();
         try { setTrip(await api(`/trips/${S.trip.id}/proposals/${p.id}/approve`, 'POST', { orderId: data.orderID })); S.busy = null; render(); }
         catch (e) { S.busy = null; S.error = e; render(); }
       },
@@ -127,7 +132,7 @@ function errorBox() {
 function landing() {
   return `<section class="hero">
     <h1>Plan the trip. Let the money follow.</h1>
-    <p class="lead">Tell the agent where you are going and what you can spend. It builds the itinerary and budget, places PayPal holds, and when the plan changes it works out exactly what to release or refund. Nothing moves until you confirm.</p>
+    <p class="lead">Tell the agent where you are going and what you can spend. It builds the itinerary and budget, places a PayPal trip reserve with a quota per item, and when the plan changes it reallocates reserve quota or proposes a refund. Nothing moves until you confirm.</p>
     <div class="card">
       <label for="prompt" class="sr" style="position:absolute;left:-9999px">Describe your trip</label>
       <textarea id="prompt" rows="4" maxlength="1200" placeholder="Three of us, Lisbon, 4 days in May, $1,200 total. A flat, a boat tour, a Sintra day trip.">${esc(S.draft)}</textarea>
@@ -137,8 +142,8 @@ function landing() {
     </div>
     <div class="how">
       <div><b>1. Plan</b>One sentence in. Itinerary, budget and who owes what come out.</div>
-      <div><b>2. Hold</b>You approve once in PayPal. Each item gets its own authorization; lodging is paid up front.</div>
-      <div><b>3. Change</b>Rain, a cancellation, someone drops out. The agent proposes the void, refund or new hold. You confirm.</div>
+      <div><b>2. Hold</b>You approve once in PayPal to place a trip reserve. Each item gets a quota under the reserve; prepaid lodging is charged up front.</div>
+      <div><b>3. Change &amp; Close</b>When plans change, the agent reallocates reserve quota or proposes a refund. At trip close, held items are captured and unused reserve is voided.</div>
     </div>
   </section>`;
 }
@@ -161,17 +166,32 @@ function proposalCard() {
   const t = S.trip; const p = t.proposal;
   if (!p) return '';
   const hasHold = p.actions.some((a) => a.type === 'hold');
-  const label = (a) => a.type === 'hold' ? `<span class="k">Hold</span>${esc(a.title)}${a.captureAfter ? ' <small>(charged now)</small>' : ''}` : a.type === 'void' ? `<span class="k">Release</span>${esc(a.title)}` : `<span class="k">Refund</span>${esc(a.title)}`;
+  const label = (a) => {
+    if (a.type === 'hold') return `<span class="k">Hold</span>${esc(a.title)}${a.captureAfter ? ' <small>(charged now)</small>' : ' <small>(in trip reserve)</small>'}`;
+    if (a.type === 'allocate') return `<span class="k">Use reserve</span>${esc(a.title)} <small>(from existing trip reserve)</small>`;
+    if (a.type === 'release') return `<span class="k">Free quota</span>${esc(a.title)} <small>(freed in trip reserve; voided at close)</small>`;
+    if (a.type === 'capture') return `<span class="k">Charge</span>${esc(a.title)} <small>(settle held quota)</small>`;
+    if (a.type === 'void') return `<span class="k">Void reserve</span>${esc(a.title)} <small>(release in PayPal)</small>`;
+    return `<span class="k">Refund</span>${esc(a.title)}`;
+  };
   const net = p.netCents;
-  const netText = net === 0 ? 'No net change' : net > 0 ? `${usd(net)} more on hold or charged` : `${usd(-net)} released or returned`;
-  const title = p.kind === 'checkout' ? 'Ready to book' : 'The plan changed - here is the money difference';
+  let netText;
+  if (p.kind === 'close') {
+    const capSum = p.actions.filter((a) => a.type === 'capture').reduce((s, a) => s + a.cents, 0);
+    const voidSum = p.actions.filter((a) => a.type === 'void').reduce((s, a) => s + a.cents, 0);
+    netText = `${usd(capSum)} charged · ${usd(voidSum)} unused reserve voided`;
+  } else {
+    netText = net === 0 ? 'No net change' : net > 0 ? `${usd(net)} more on hold or charged` : `${usd(-net)} released or returned`;
+  }
+  const title = p.kind === 'checkout' ? 'Ready to book' : p.kind === 'close' ? 'Close trip - settle holds & void unused reserve' : 'The plan changed - here is the money difference';
+  const btnText = p.kind === 'close' ? `Confirm & close trip (${usd(p.capCents)})` : p.actions.every((a) => a.type === 'refund') ? `Confirm - refund ${usd(p.capCents)}` : `Confirm plan & quota change`;
   return `<section class="card proposal" aria-label="Proposal awaiting confirmation">
     <h2>${title}</h2>
     <div style="font-size:.95rem">${esc(p.summary)}</div>
     <ul class="acts">${p.actions.map((a) => `<li class="${a.type}"><span>${label(a)}</span><b>${usd(a.cents)}</b></li>`).join('')}</ul>
     <div class="sumline"><span>Net: <b>${netText}</b></span><span>Confirmed cap: <b>${usd(p.capCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
-    ${hasHold ? '<div style="font-size:.85rem;color:var(--muted)">Pressing the PayPal button confirms exactly the amounts above, then PayPal asks you to approve. Sandbox buyer logins are in the README.</div><div id="pp"></div>'
-      : `<div class="row"><button class="btn" data-act="confirm" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : `Confirm - release ${usd(p.capCents)}`}</button></div>`}
+    ${hasHold ? '<div style="font-size:.85rem;color:var(--muted)">Pressing the PayPal button confirms the exact amounts above, then PayPal asks you to approve the trip reserve.</div><div id="pp"></div>'
+      : `<div class="row"><button class="btn" data-act="confirm" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : btnText}</button></div>`}
   </section>`;
 }
 
@@ -196,7 +216,11 @@ function agentCard() {
 function ledgerCard() {
   const t = S.trip;
   const r = S.recon;
-  const verifyLine = r ? (r.allMatch ? `<span class="ok">Ledger matches PayPal: ${r.rows.length}/${r.rows.length} records checked</span>` : `<span class="bad">${r.rows.filter((x) => !x.match).length} record(s) differ from PayPal</span>`) : '<span style="color:var(--muted)">Every row below is copied from a PayPal response.</span>';
+  const verifyLine = r
+    ? (r.allMatch
+      ? `<span class="ok">Ledger matches PayPal: ${r.rows.length}/${r.rows.length} PayPal records &amp; ${r.heldItemsCheck?.length ?? 0} held item(s) verified</span>`
+      : `<span class="bad">${r.rows.filter((x) => !x.match).length + (r.heldItemsCheck?.filter((h) => !h.valid).length ?? 0)} discrepancy(s) against PayPal</span>`)
+    : '<span style="color:var(--muted)">PayPal facts are copied from PayPal responses; quotas track item allocations under each trip reserve.</span>';
   return `<section class="card"><h2>Budget &amp; ledger</h2>
     <div class="tabs" role="tablist"><button class="tab" role="tab" data-act="tab" data-tab="budget" aria-selected="${S.tab === 'budget'}">Budget by item</button><button class="tab" role="tab" data-act="tab" data-tab="ledger" aria-selected="${S.tab === 'ledger'}">PayPal ledger (${t.ledger.length})</button></div>
     <div class="grid-wrap"><div id="grid" class="ag-theme-quartz" style="height:${S.tab === 'budget' ? 60 + 42 * Math.max(3, t.plan.items.length + t.removedItems.length) : 60 + 42 * Math.max(3, t.ledger.length)}px;max-height:520px"></div></div>
@@ -207,8 +231,9 @@ function ledgerCard() {
 function tripView() {
   const t = S.trip; const tot = t.totals;
   const per = Object.entries(t.perPerson).map(([n, c]) => `<span>${esc(n)} <b>${usd(c)}</b></span>`).join('');
-  return `<div class="tripbar"><div><h1>${esc(t.plan.title)}</h1><div class="sub">${esc(t.plan.destination)} &middot; ${esc(t.plan.travelers.join(', '))}${t.plan.budgetCents ? ` &middot; budget ${usd(t.plan.budgetCents)}` : ''}</div></div><button class="btn ghost small" data-act="new">New trip</button></div>
-  <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Paid</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
+  const showClose = t.canClose && t.ledger.length > 0 && t.proposal?.kind !== 'close';
+  return `<div class="tripbar"><div><h1>${esc(t.plan.title)}</h1><div class="sub">${esc(t.plan.destination)} &middot; ${esc(t.plan.travelers.join(', '))}${t.plan.budgetCents ? ` &middot; budget ${usd(t.plan.budgetCents)}` : ''}</div></div><div class="row">${showClose ? `<button class="btn small" data-act="close" ${S.busy ? 'disabled' : ''}>Close trip</button>` : ''}<button class="btn ghost small" data-act="new">New trip</button></div></div>
+  <div class="stats"><div class="stat"><small>Planned</small><b>${usd(tot.plannedCents)}</b></div><div class="stat"><small>On hold${tot.unusedReserveCents > 0 ? ` (+${usd(tot.unusedReserveCents)} free reserve)` : ''}</small><b>${usd(tot.heldCents)}</b></div><div class="stat"><small>Paid</small><b>${usd(tot.paidCents)}</b></div><div class="stat"><small>Refunded</small><b>${usd(tot.refundedCents)}</b></div></div>
   <div class="layout">
     <div class="col">${window.innerWidth <= 900 ? proposalCard() : ''}<section class="card"><h2>Itinerary</h2>${itinerary()}<h2 style="margin-top:14px">Shares</h2><div class="per">${per}</div></section>${ledgerCard()}</div>
     <div class="col">${window.innerWidth > 900 ? proposalCard() : ''}${failedCard()}${agentCard()}</div>
@@ -236,12 +261,12 @@ function mountGrid() {
       { field: 'refunded', headerName: 'Refunded', valueFormatter: money, width: 110, type: 'rightAligned' },
     ], defaultColDef: { sortable: true, resizable: true }, suppressCellFocus: true }));
   } else {
-    const title = (id) => t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id;
-    const rows = [...t.ledger].reverse().map((f) => ({ seq: f.seq, at: new Date(f.at).toLocaleTimeString(), op: OPS[f.op], item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
+    const title = (id) => (id === '_reserve' ? 'Trip reserve (PayPal Authorization)' : t.plan.items.find((i) => i.id === id)?.title ?? t.removedItems.find((i) => i.id === id)?.title ?? id);
+    const rows = [...t.ledger].reverse().map((f) => ({ seq: f.seq, at: new Date(f.at).toLocaleTimeString(), op: OPS[f.op] ?? f.op, item: title(f.itemId), id: f.id, cents: f.cents, status: f.status }));
     grids.push(agGrid.createGrid(el, { rowData: rows, columnDefs: [
-      { field: 'seq', headerName: '#', width: 64 }, { field: 'at', headerName: 'Time', width: 100 }, { field: 'op', headerName: 'Action', width: 130 },
+      { field: 'seq', headerName: '#', width: 64 }, { field: 'at', headerName: 'Time', width: 100 }, { field: 'op', headerName: 'Action', width: 140 },
       { field: 'item', flex: 2, minWidth: 180 }, { field: 'id', headerName: 'PayPal ID', width: 190, cellStyle: { fontFamily: 'ui-monospace, monospace', fontSize: '12px' } },
-      { field: 'cents', headerName: 'Amount', valueFormatter: money, width: 110, type: 'rightAligned' }, { field: 'status', headerName: 'PayPal status', width: 130 },
+      { field: 'cents', headerName: 'Amount', valueFormatter: money, width: 110, type: 'rightAligned' }, { field: 'status', headerName: 'Status', width: 130 },
     ], defaultColDef: { sortable: true, resizable: true }, suppressCellFocus: true }));
   }
 }
@@ -276,6 +301,7 @@ $app.addEventListener('click', (e) => {
   else if (a === 'sample') { S.draft = SAMPLE_TRIPS[b.dataset.i]; render(); }
   else if (a === 'sample-change') { S.changeDraft = SAMPLE_CHANGES[b.dataset.i]; render(); }
   else if (a === 'change') sendChange();
+  else if (a === 'close') closeTrip();
   else if (a === 'confirm') confirmRelease();
   else if (a === 'retry-proposal') retryProposal();
   else if (a === 'retry-error') S.error?.retryFn?.();

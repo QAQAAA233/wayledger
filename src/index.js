@@ -100,6 +100,7 @@ export default {
 
       if (parts.length === 3 && request.method === 'GET') return unwrap(await trip.call('view', []));
       if (parts[3] === 'reconcile') return unwrap(await trip.call('reconcile', []));
+      if (parts[3] === 'close' && request.method === 'POST') return unwrap(await trip.call('closeTrip', []));
       if (parts[3] === 'changes' && request.method === 'POST') {
         if (typeof body.text !== 'string' || body.text.trim().length < 4 || body.text.length > 800) throw new UserFacingError('Describe what changed (4-800 characters).', 'BAD_INPUT');
         await guardAI(env, request);
