@@ -1,6 +1,6 @@
 {
- "neurons": 84014.60207223892,
- "calls": 1482,
+ "neurons": 111869.97022104263,
+ "calls": 1892,
  "byTag": {
   "dev0": {
    "neurons": 4991.749555587769,
@@ -55,8 +55,16 @@
     "@cf/google/gemma-4-26b-a4b-it": 9549.052664756775,
     "@cf/openai/gpt-oss-120b": 30091.08595275879
    }
+  },
+  "holdout2": {
+   "neurons": 27855.36814880371,
+   "calls": 410,
+   "byModel": {
+    "@cf/google/gemma-4-26b-a4b-it": 6721.053504943848,
+    "@cf/openai/gpt-oss-120b": 21134.314643859863
+   }
   }
  },
- "usd": 0.9242,
+ "usd": 1.2306,
  "capUsd": 2.5
 }

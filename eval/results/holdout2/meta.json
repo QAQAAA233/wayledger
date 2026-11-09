@@ -1,0 +1,29 @@
+{
+ "tag": "holdout2",
+ "startedAt": "2026-11-09T12:44:12.764Z",
+ "commit": "4a6dc64",
+ "uncommittedChangesInSrcOrEval": true,
+ "approaches": [
+  "agent",
+  "baseline"
+ ],
+ "models": [
+  "gemma",
+  "oss"
+ ],
+ "reps": 3,
+ "split": "holdout",
+ "fileHashes": {
+  "src/agent/prompts.js": "9f6cd814d670b305",
+  "src/agent/tools.js": "032b08ccd9d40bc6",
+  "src/agent/loop.js": "ee9fea40c35d383b",
+  "src/agent/schema.js": "02eb5719743bef51",
+  "src/agent/model.js": "5cc19c8791354b6d",
+  "src/domain/policy.js": "ff355b6be762b3ef",
+  "src/domain/mandate.js": "6fcef43951121b68",
+  "src/domain/delta.js": "81bb0b0bfb4e009e",
+  "src/engine.js": "7313239d54ddd7f1",
+  "eval/world.mjs": "88c9bb7bdc5ef61e",
+  "eval/scenarios.mjs": "7b1db29667f8943e"
+ }
+}

@@ -337,7 +337,7 @@ function proposalCard() {
   const unfunded = p.unfunded?.length ? `<div class="notice">Never booked, so there is nothing to settle for: ${p.unfunded.map((u) => `${esc(u.title)} (${usd(u.cents)})`).join(', ')}.</div>` : '';
   const why = p.outside?.length ? `<div class="notice waits"><b>Why the agent did not just do it</b><ul>${p.outside.map((r) => `<li>${esc(r.text)}</li>`).join('')}</ul></div>` : '';
   const loss = p.operatorLoss?.length ? `<div class="notice waits"><b>What this would cost you at the operator</b><ul>${p.operatorLoss.map((l) => `<li>${esc(l.title)}: ${usd(l.lossCents)} (${esc(l.why)})${l.quote ? `<blockquote>&ldquo;${esc(l.quote)}&rdquo; <small>from your terms</small></blockquote>` : ''}</li>`).join('')}</ul></div>` : '';
-  const note = p.agentNote ? `<div class="agentnote"><b>Agent's note</b> ${esc(p.agentNote)}</div>` : '';
+  const note = p.agentNote ? `<div class="agentnote"><b>Agent's note (its own words, not checked by the code)</b> ${esc(p.agentNote)}</div>` : '';
   let action;
   if (!owner) action = '<div class="hint">Only the person who planned this trip can confirm it.</div>';
   else if (expired) {
@@ -349,10 +349,10 @@ function proposalCard() {
   return `<section class="card proposal" aria-label="Proposal awaiting confirmation">
     <h2>${title}</h2>
     <div class="summary">${esc(p.summary)}</div>
-    ${note}
     <ul class="acts">${p.lines.map((l) => `<li class="${l.type}"><span>${esc(l.text)}</span></li>`).join('')}</ul>
     <div class="effect">${esc(p.effectText)}</div>
     ${unfunded}${loss}${why}
+    ${note}
     <div class="sumline"><span>Most that can move in PayPal: <b>${usd(p.mostCanMoveCents)}</b></span><span>Expires in <b id="exp"></b></span></div>
     ${p.kind === 'checkout' && owner && !t.ledger.length ? mandateEditor(p) : ''}
     ${action}

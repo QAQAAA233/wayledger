@@ -36,6 +36,7 @@ export function validatePolicyFact(raw, { docs, plan }) {
     if (docs.some((d) => mentions(d.text, item.title))) throw new PolicyError(`The terms do mention ${item.title}. Copy the sentence that does and say what it means.`);
     return { docId: null, itemId: item.id, itemTitle: item.title, quote: null, nonRefundable: false, freeCancelUntil: null, freeCancelUntilMs: null, penaltyPercent: null, none: true };
   }
+  if (!raw.docId) throw new PolicyError('Say which document the sentence is in: give its docId (the ids come from read_documents).');
   const doc = docs.find((d) => d.id === raw.docId);
   if (!doc) throw new PolicyError(`There is no document ${raw.docId}. Use a docId from read_documents.`);
   if (typeof raw.quote !== 'string' || !quoteIn(doc.text, raw.quote)) {

@@ -1,0 +1,28 @@
+{
+ "tag": "dev5",
+ "startedAt": "2026-11-09T12:46:43.121Z",
+ "commit": "4a6dc64",
+ "uncommittedChangesInSrcOrEval": true,
+ "approaches": [
+  "agent",
+  "baseline"
+ ],
+ "models": [
+  "gemma"
+ ],
+ "reps": 3,
+ "split": "dev",
+ "fileHashes": {
+  "src/agent/prompts.js": "d0c95e935a564096",
+  "src/agent/tools.js": "032b08ccd9d40bc6",
+  "src/agent/loop.js": "ee9fea40c35d383b",
+  "src/agent/schema.js": "02eb5719743bef51",
+  "src/agent/model.js": "5cc19c8791354b6d",
+  "src/domain/policy.js": "ff355b6be762b3ef",
+  "src/domain/mandate.js": "6fcef43951121b68",
+  "src/domain/delta.js": "81bb0b0bfb4e009e",
+  "src/engine.js": "7313239d54ddd7f1",
+  "eval/world.mjs": "b8e95b90dfef8e80",
+  "eval/scenarios.mjs": "aebe24c103420b90"
+ }
+}
