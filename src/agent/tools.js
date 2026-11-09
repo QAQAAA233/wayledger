@@ -19,7 +19,15 @@ const BASES = ['same_as_replaced', 'user_given', 'free'];
 // (One long list of operations that each take any of a dozen fields made models mix the fields up; see eval/README.md.)
 const STR = { type: 'string' };
 const EDIT_PROPERTIES = {
-  remove: { type: 'array', maxItems: 8, items: STR, description: 'Ids of the items to remove (the ids come from get_trip).' },
+  remove: {
+    type: 'array',
+    maxItems: 8,
+    items: {
+      type: ['string', 'object', 'number', 'integer'],
+      description: 'Item id (e.g. "i2"), title (e.g. "Sunset Boat Tour"), item index, or { id } object.'
+    },
+    description: 'Ids or names of the items to remove (the ids come from get_trip).'
+  },
   reprice: {
     type: 'array', maxItems: 8,
     items: { type: 'object', properties: { itemId: STR, amount: { type: 'number', description: 'The new total price in USD for the whole group.' } }, required: ['itemId', 'amount'] },
@@ -66,6 +74,46 @@ export function toOperations(a) {
 
 export const canon = (ops) => JSON.stringify((ops ?? []).map((o) => JSON.parse(JSON.stringify(o))).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
+export function resolveItemRef(ref, items = []) {
+  if (ref == null) return null;
+  if (typeof ref === 'object') {
+    const candidate = ref.id ?? ref.itemId ?? ref.title ?? ref.name ?? ref.item;
+    if (candidate != null) return resolveItemRef(candidate, items);
+    return null;
+  }
+  const s = String(ref).trim();
+  if (!s) return null;
+  const byId = items.find((i) => i.id === s);
+  if (byId) return byId.id;
+  if (typeof ref === 'number' || /^\d+$/.test(s)) {
+    const num = Number(s);
+    const byIdNum = items.find((i) => i.id === `i${num}`);
+    if (byIdNum) return byIdNum.id;
+    if (num >= 1 && num <= items.length) return items[num - 1].id;
+    if (num >= 0 && num < items.length) return items[num].id;
+  }
+  const lower = s.toLowerCase();
+  const byExactTitle = items.filter((i) => i.title.toLowerCase() === lower);
+  if (byExactTitle.length === 1) return byExactTitle[0].id;
+  const bySubTitle = items.filter((i) => i.title.toLowerCase().includes(lower));
+  if (bySubTitle.length === 1) return bySubTitle[0].id;
+  return null;
+}
+
+export function truncateSentence(str, maxLen) {
+  if (!str || str.length <= maxLen) return str;
+  const sub = str.slice(0, maxLen);
+  const m = [...sub.matchAll(/([.!?])(\s+|$)/g)];
+  if (m.length > 0) {
+    const last = m[m.length - 1];
+    const cutPos = last.index + 1;
+    if (cutPos >= Math.floor(maxLen * 0.4)) return str.slice(0, cutPos);
+  }
+  const lastSpace = sub.lastIndexOf(' ');
+  if (lastSpace > 0) return sub.slice(0, lastSpace).trimEnd() + '...';
+  return sub + '...';
+}
+
 // Facts the model may not invent are checked here, before an edit is even simulated. "The traveler wrote" means the
 // traveler's own message of this run. A pasted document is somebody else's text: it never names a traveler, sets a price
 // or decides who shares what (and an amount is an amount of money, not a day or a time).
@@ -77,10 +125,28 @@ function groundOps(ops, ctx, s) {
     const missing = people.filter((p) => !namesPerson(text, p));
     if (missing.length) throw new Error(`${what} must be named by the traveler: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not in the traveler's own message. Who is on the trip and who shares what is never worked out from documents or guessed; ask the traveler.`);
   };
-  const removed = new Set(ops.filter((o) => o.op === 'remove').map((o) => o.itemId));
-  const everyone = ops.find((o) => o.op === 'set_travelers')?.travelers ?? s.plan.travelers;
+  const resolvedOps = ops.map((op) => {
+    if (op.op === 'remove') {
+      const id = resolveItemRef(op.itemId, s.plan.items);
+      if (!id) {
+        throw new Error(`There is no item ${op.itemId}. Use an id from get_trip.`);
+      }
+      return { ...op, itemId: id };
+    }
+    if (['reprice', 'update_item'].includes(op.op)) {
+      const id = resolveItemRef(op.itemId, s.plan.items);
+      return id ? { ...op, itemId: id } : op;
+    }
+    if (op.op === 'add' && op.item?.replaces) {
+      const id = resolveItemRef(op.item.replaces, s.plan.items);
+      return id ? { ...op, item: { ...op.item, replaces: id } } : op;
+    }
+    return op;
+  });
+  const removed = new Set(resolvedOps.filter((o) => o.op === 'remove').map((o) => o.itemId));
+  const everyone = resolvedOps.find((o) => o.op === 'set_travelers')?.travelers ?? s.plan.travelers;
   const out = [];
-  for (const op of ops) {
+  for (const op of resolvedOps) {
     if (['remove', 'reprice', 'update_item'].includes(op.op) && !s.plan.items.some((i) => i.id === op.itemId)) {
       throw new Error(`There is no item ${op.itemId}. Use an id from get_trip.`);
     }
@@ -151,7 +217,7 @@ function comparison(ctx, chosenKey, reason) {
   }
   if (options.length < 2) return null;
   const chosen = options.find((o) => o.chosen);
-  return { title: `Compared ${options.length} options`, detail: `Chose ${chosen.option}: ${String(reason).slice(0, 300)}`, options, chosen: chosen.option, reason: String(reason).slice(0, 500) };
+  return { title: `Compared ${options.length} options`, options, chosen: chosen.option, reason: String(reason).slice(0, 500) };
 }
 
 export function createTools() {
@@ -345,9 +411,9 @@ export function createTools() {
       const tried = new Set([...ctx.simulated.values()].map((x) => x.planKey)).size;
       if (chosen.sim.booked && chosen.sim.effect.touchesPayPal && tried < ctx.minOptions) return refuse(MIN_OPTIONS_MESSAGE(tried, ctx.minOptions), 'Rejected the choice', `Money would move on ${tried} option; it needs to be weighed against another.`);
       const compare = comparison(ctx, key, reason);
-      const decision = { title: 'Chose an option', detail: String(reason).slice(0, 500), agentReason: true, note: String(summary).slice(0, 400), authority: basis, basis: describeAuthority(basis) };
+      const decision = { title: 'Chose an option', detail: truncateSentence(String(reason), 500), agentReason: true, note: truncateSentence(String(summary), 400), authority: basis, basis: describeAuthority(basis) };
       let out;
-      try { out = await ctx.submitEdit({ ops, agentNote: String(summary).slice(0, 400), runId: ctx.runId, authority: basis }); } catch (e) { return refuse(e.message, 'The choice was refused'); }
+      try { out = await ctx.submitEdit({ ops, agentNote: truncateSentence(String(summary), 400), runId: ctx.runId, authority: basis }); } catch (e) { return refuse(e.message, 'The choice was refused'); }
       const result = { accepted: true, outcome: out.outcome, summary: out.summary, ...(out.error ? { error: out.error } : {}) };
       return { result, final: { kind: 'submitted', outcome: out.outcome, proposalId: out.proposalId, summary: out.summary, within: out.mandate?.within, reasons: out.mandate?.reasons?.map((r) => r.text) ?? [], money: out.money, effect: out.effect }, decision, ...(compare ? { compare } : {}) };
     },
@@ -358,7 +424,7 @@ export function createTools() {
     description: 'Ask the traveler one question when no safe option exists or the choice is a matter of their taste. Ends the task.',
     terminal: true,
     parameters: { type: 'object', properties: { question: { type: 'string', description: 'Under 500 characters; longer is cut.' } }, required: ['question'] },
-    run: async (a) => ({ result: { sent: true }, final: { kind: 'asked', question: String(a.question).slice(0, 500) }, event: { title: 'Asked you a question', detail: String(a.question).slice(0, 500) } }),
+    run: async (a) => ({ result: { sent: true }, final: { kind: 'asked', question: String(a.question).slice(0, 500) }, event: { title: 'Asked you a question', detail: truncateSentence(String(a.question), 500) } }),
   });
 
   add({
@@ -366,7 +432,7 @@ export function createTools() {
     description: 'Finish without changing anything, when the facts show the plan is fine or the traveler only asked a question. Say what you checked. Ends the task.',
     terminal: true,
     parameters: { type: 'object', properties: { note: { type: 'string', description: 'What you checked and why nothing needs to change (under 400 characters; longer is cut).' } }, required: ['note'] },
-    run: async (a) => ({ result: { done: true }, final: { kind: 'no_change', note: String(a.note).slice(0, 400) }, event: { title: 'Decided nothing needs to change', detail: String(a.note).slice(0, 400), agentReason: true } }),
+    run: async (a) => ({ result: { done: true }, final: { kind: 'no_change', note: String(a.note).slice(0, 400) }, event: { title: 'Decided nothing needs to change', detail: truncateSentence(String(a.note), 400), agentReason: true } }),
   });
 
   return tools;
@@ -378,9 +444,9 @@ export const toolDefs = (tools) => tools.map((t) => ({ type: 'function', functio
 export async function runTool(tools, call, parsed, ctx) {
   const tool = tools.find((t) => t.name === call.name);
   if (!tool) return { result: { error: `There is no tool ${call.name}.` }, event: { title: 'Tried a tool that does not exist', detail: String(call.name).slice(0, 60), rejected: true }, invalid: true };
-  if (!parsed.ok) return { result: { error: parsed.error }, event: { title: `Sent ${tool.name} badly formed arguments`, detail: parsed.error, rejected: true }, invalid: true };
+  if (!parsed.ok) return { result: { error: parsed.error }, event: { title: `Sent ${tool.name} badly formed arguments`, detail: parsed.error, rejected: true, badArgs: true }, invalid: true, badArgs: true };
   const errs = validate(tool.parameters, parsed.value);
-  if (errs.length) return { result: { error: errs.join('; ') }, event: { title: `Sent ${tool.name} arguments that do not fit`, detail: errs.join('; '), rejected: true }, invalid: true };
+  if (errs.length) return { result: { error: errs.join('; ') }, event: { title: `Sent ${tool.name} arguments that do not fit`, detail: errs.join('; '), rejected: true, badArgs: true }, invalid: true, badArgs: true };
   return { ...(await tool.run(parsed.value, ctx)), tool };
 }
 

@@ -103,3 +103,43 @@ test('the same rule holds for a change that will wait for the traveler: a refund
   await startRun(wd);
   assert.equal(Object.values(wd.state().proposals).filter((p) => p.kind === 'change').length, 0);
 });
+
+test('simulate_edit accepts natural remove arguments: objects [{id}], titles, and numbers', async () => {
+  const m = scriptedModel([
+    ...read,
+    // 1. Model passes remove: [{ id: 'i2' }] as seen in Workers AI runs
+    ({ messages }) => ({
+      calls: [T('simulate_edit', {
+        remove: [{ id: boatOf(messages).id }],
+        add: [{ day: 2, placeId: 'wd:Q1262183', category: 'activity', amountBasis: 'same_as_replaced', replaces: boatOf(messages).id }]
+      })]
+    }),
+    // 2. Model passes remove: ['Sunset boat tour'] (title matching)
+    () => ({
+      calls: [T('simulate_edit', {
+        remove: ['Sunset boat tour']
+      })]
+    }),
+    // 3. Model passes remove: [2] (numeric matching)
+    () => ({
+      calls: [T('simulate_edit', {
+        remove: [2]
+      })]
+    }),
+    ({ messages }) => ({
+      calls: [T('submit_edit', {
+        remove: [{ id: boatOf(messages).id }],
+        add: [{ day: 2, placeId: 'wd:Q1262183', category: 'activity', amountBasis: 'same_as_replaced', replaces: boatOf(messages).id }],
+        ...say,
+        authority: BY_TRAVELER
+      })]
+    }),
+  ]);
+  const wd = await world({ run: m, terms: TERMS_OK });
+  const run = await startRun(wd);
+  assert.equal(run.final.kind, 'submitted');
+  assert.equal(run.final.outcome, 'executed');
+  const simEvents = run.events.filter((e) => e.kind === 'tool' && e.tool === 'simulate_edit');
+  assert.ok(simEvents.length >= 2);
+  assert.equal(run.events.some((e) => e.rejected && e.title.includes('arguments that do not fit')), false);
+});

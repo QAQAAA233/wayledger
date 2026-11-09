@@ -15,6 +15,19 @@ const PAYPAL_OPS = ['authorize', 'capture', 'void', 'refund'];
 const opLabel = (f) => (f.op === 'capture' && f.final ? 'Final charge' : f.external ? (f.op === 'void' ? 'Hold cancelled by PayPal' : 'Freed: hold cancelled') : OPS[f.op] ?? f.op);
 const isoIn = (days) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 
+function truncate(s, maxLen) {
+  if (!s || s.length <= maxLen) return s;
+  const sub = s.slice(0, maxLen);
+  const m = [...sub.matchAll(/([.!?])(\s+|$)/g)];
+  if (m.length > 0) {
+    const last = m[m.length - 1];
+    if (last.index + 1 >= Math.floor(maxLen * 0.4)) return s.slice(0, last.index + 1);
+  }
+  const space = sub.lastIndexOf(' ');
+  if (space > 0) return sub.slice(0, space).trimEnd() + '...';
+  return sub + '...';
+}
+
 const SAMPLE_TRIPS = [
   'Three friends - Ana, Ben and Cy - 4 days in Lisbon. Budget $1,200 total. A flat, a sunset boat tour and a Sintra day trip.',
   'Family of four, long weekend in Kyoto. Budget $2,400. A ryokan night, a cooking class and the bullet train.',
@@ -284,7 +297,7 @@ function landing() {
         <button class="btn" data-act="plan" ${S.busy ? 'disabled' : ''}>${S.busy ? `<span class="spin"></span>${esc(S.busy)}` : 'Plan my trip'}</button>
       </div>
       <div class="row" style="margin-top:8px"><span style="color:var(--muted);font-size:.85rem">Try one:</span></div>
-      <div class="chips">${SAMPLE_TRIPS.map((t, i) => `<button class="chip" data-act="sample" data-i="${i}">${esc(t.length > 62 ? t.slice(0, 60) + '...' : t)}</button>`).join('')}</div>
+      <div class="chips">${SAMPLE_TRIPS.map((t, i) => `<button class="chip" data-act="sample" data-i="${i}">${esc(truncate(t, 60))}</button>`).join('')}</div>
       ${errorBox('landing')}
       ${last ? `<p class="hint"><a href="#/t/${esc(last)}">Open your last trip</a></p>` : ''}
     </div>
@@ -300,7 +313,7 @@ function itemRow(i) {
   const st = i.money.status;
   const detail = st === 'held' ? `${usd(i.money.heldCents)} held${i.dueOn && S.trip.settlement ? `, charged on ${dateText(i.dueOn)}` : ''}` : st === 'paid' ? `${usd(i.money.paidCents)} charged${i.chargedOn ? ` ${dateText(i.chargedOn)}` : ''}${i.chargedSimulated ? ' (simulated day)' : ''}` : st === 'part-refunded' ? `${usd(i.money.paidCents)} charged, ${usd(i.money.refundedCents)} refunded` : st === 'released' ? 'never charged' : '';
   const wd = i.placeId?.startsWith('wd:') ? ` &middot; <a href="https://www.wikidata.org/wiki/${esc(i.placeId.slice(3))}" target="_blank" rel="noopener">real place</a>` : '';
-  const basis = i.amountBasis === 'same_as_replaced' ? '<div class="basis">Budget set aside at the price of what it replaces. The ticket price was not looked up.</div>' : '';
+  const basis = i.amountBasis === 'same_as_replaced' ? `<div class="basis">Held ${usd(i.amountCents)}, the same as the ${i.category === 'activity' ? 'tour' : 'item'} it replaces, so your plan total stays the same.</div>` : '';
   const when = i.amountCents === 0 ? 'free' : i.prepaid ? 'paid in advance' : 'paid when the trip closes';
   return `<div class="item"><div class="t">${esc(i.title)}</div><div class="amt">${i.amountCents === 0 ? 'Free' : usd(i.amountCents)}</div>
     <div class="meta">${esc(i.category)} &middot; ${esc(i.participants.length === S.trip.plan.travelers.length ? 'everyone' : i.participants.join(', '))} &middot; ${when}${detail ? ` &middot; ${detail}` : ''}${wd}</div>${basis}
@@ -405,7 +418,7 @@ function eventHtml(e) {
   const cls = ['ev', e.kind, e.rejected ? 'rej' : '', e.simulated ? 'sim' : '', e.waiting ? 'wait' : '', e.failed ? 'bad' : '', e.ok === true ? 'good' : ''].filter(Boolean).join(' ');
   return `<li class="${cls}"><span class="evtag">${esc(label)}</span><div class="evb">
     <div class="evt">${esc(e.title)}${e.simulated ? ' <span class="simbadge">SIMULATED</span>' : ''}</div>
-    ${e.detail ? `<div class="evd">${e.agentReason ? '<i>Agent\'s reason:</i> ' : ''}${esc(e.detail)}</div>` : ''}
+    ${e.detail && e.kind !== 'compare' ? `<div class="evd">${e.agentReason ? '<i>Agent\'s reason:</i> ' : ''}${esc(e.detail)}</div>` : ''}
     ${e.note ? `<div class="evd"><i>Agent's note to you:</i> ${esc(e.note)}</div>` : ''}
     ${e.basis ? `<div class="evd basis"><i>Rests on (checked by the code):</i> ${esc(e.basis)}</div>` : ''}
     ${e.options ? `<ul class="opts">${e.options.map((o) => `<li class="${o.chosen ? 'chosen' : ''}"><b>${esc(o.option)}${o.chosen ? ' (chosen)' : ''}</b> ${esc(o.text)}<span class="evs">${[`refund ${usd(Math.round(o.refundUsd * 100))}`, `charge ${usd(Math.round(o.chargeUsd * 100))}`, o.lossUsd == null ? null : `costs you at the operator ${usd(Math.round(o.lossUsd * 100))}`, o.within == null ? null : o.within ? 'inside your limits' : 'beyond your limits'].filter(Boolean).join(', ')}</span></li>`).join('')}</ul>` : ''}
@@ -414,13 +427,27 @@ function eventHtml(e) {
   </div></li>`;
 }
 
+function visibleEvents(events = []) {
+  const succeededTools = new Set(events.filter((e) => e.kind === 'tool' && !e.rejected).map((e) => e.tool));
+  if (events.some((e) => e.kind === 'decision' || e.kind === 'result')) {
+    succeededTools.add('simulate_edit');
+    succeededTools.add('submit_edit');
+  }
+  return events.filter((e) => {
+    const isArgError = e.badArgs || (e.title && (e.title.includes('arguments that do not fit') || e.title.includes('badly formed arguments')));
+    if (isArgError && succeededTools.has(e.tool)) return false;
+    return true;
+  });
+}
+
 function trailHtml() {
   const r = S.run;
   if (!r) return '<div class="hint">When you send a change, or the agent wakes up, every step it takes shows up here: what it looked up, what it saw, which options it tried, and why it chose.</div>';
   const working = ['queued', 'running'].includes(r.status);
   const calls = r.events.filter((e) => e.kind === 'model').length;
+  const events = visibleEvents(r.events);
   return `<div class="runhead">${working ? '<span class="spin"></span> The agent is working' : 'Last run'}${r.simulated ? ' <span class="simbadge">demo, simulated forecast</span>' : ''}</div>
-    <ol class="trail">${r.events.map(eventHtml).join('')}${working ? '<li class="ev working"><span class="evtag">...</span><div class="evb"><div class="evt">Working</div></div></li>' : ''}</ol>
+    <ol class="trail">${events.map(eventHtml).join('')}${working ? '<li class="ev working"><span class="evtag">...</span><div class="evb"><div class="evt">Working</div></div></li>' : ''}</ol>
     ${!working && calls ? `<div class="evs">${calls} step${calls === 1 ? '' : 's'} of thinking, ${r.stats?.neurons != null ? `${r.stats.neurons} units of AI compute` : 'AI compute not recorded'}${r.stats?.model ? `, model ${esc(r.stats.model)}` : ''}.</div>` : ''}`;
 }
 
@@ -451,7 +478,7 @@ function termsPanel() {
 const ruleText = (p) => (p.nonRefundable ? 'non-refundable' : [p.freeCancelUntil && `free to cancel until ${esc(p.freeCancelUntil)}`, p.penaltyPercent != null && `${p.penaltyPercent}% charged ${p.freeCancelUntil ? 'after that' : 'if cancelled'}`].filter(Boolean).join(', '));
 function termsList() {
   const t = S.trip;
-  const docs = t.documents.map((d) => `<div class="doc">${d.text == null ? `Booking terms were pasted (${d.chars} characters). Only the person who planned the trip can read them.` : esc(d.text.length > 160 ? d.text.slice(0, 158) + '...' : d.text)}</div>`).join('');
+  const docs = t.documents.map((d) => `<div class="doc">${d.text == null ? `Booking terms were pasted (${d.chars} characters). Only the person who planned the trip can read them.` : esc(truncate(d.text, 160))}</div>`).join('');
   const rules = t.policies.filter((p) => !p.none).map((p) => (p.quote == null ? `<div class="doc">${esc(p.itemTitle)}: ${ruleText(p)}</div>` : `<blockquote>&ldquo;${esc(p.quote)}&rdquo; <small>${esc(p.itemTitle)}: ${ruleText(p)}</small></blockquote>`)).join('');
   const silent = t.policies.filter((p) => p.none).map((p) => esc(p.itemTitle));
   return `${docs}${rules ? `<div class="rules"><b>Rules the agent found in your terms</b>${rules}</div>` : ''}${silent.length ? `<div class="hint">Your terms do not mention: ${silent.join(', ')}.</div>` : ''}`;
@@ -461,7 +488,7 @@ function agentCard() {
   const t = S.trip;
   const working = Boolean(S.run && ['queued', 'running'].includes(S.run.status)) || Boolean(S.busy);
   const input = t.closed || !t.owner ? '' : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="change" maxlength="800" placeholder="Tell the agent what changed..." value="${esc(S.changeDraft)}" aria-label="What changed"><button class="btn" data-act="change" ${working ? 'disabled' : ''}>Send</button></div>
-    <div class="chips">${SAMPLE_CHANGES.map((c, i) => `<button class="chip" data-act="sample-change" data-i="${i}">${esc(c.length > 54 ? c.slice(0, 52) + '...' : c)}</button>`).join('')}</div>`;
+    <div class="chips">${SAMPLE_CHANGES.map((c, i) => `<button class="chip" data-act="sample-change" data-i="${i}">${esc(truncate(c, 54))}</button>`).join('')}</div>`;
   const demo = t.owner && !t.closed && t.ledger.length ? `<div class="demo"><b>Demo</b> The agent checks the real forecast on a schedule${t.nextWakeAt ? ` (next check about ${esc(new Date(t.nextWakeAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }))})` : ''}. This button runs that check now with a <b>simulated</b> storm forecast, so you can watch it work.
     <div class="row"><button class="btn small ghost" data-act="demo" ${working ? 'disabled' : ''}>Fast-forward to the next check (simulated storm)</button></div>
     ${t.settlement && t.plan.startDate ? `<div style="margin-top:8px">The calendar charges each item on its own day. This moves the demo clock one day ahead so you can watch the money follow the trip; what it does is marked <b>simulated</b>.</div><div class="row"><button class="btn small ghost" data-act="advance" ${working ? 'disabled' : ''}>Fast-forward a day (simulated)</button></div>` : ''}</div>` : '';

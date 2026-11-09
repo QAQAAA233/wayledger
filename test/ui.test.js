@@ -102,7 +102,7 @@ test('Flow A: the agent wakes, reads the terms, quotes the sentence, finds a rea
     assert.match(trail, /Tried option A/);
     assert.match(trail, /Compared 2 options/, 'the options it weighed are on the trail');
     assert.match(trail, /A \(chosen\)[\s\S]*Electricity Museum[\s\S]*B Remove Sunset boat tour/);
-    assert.match(trail, /Chose A: The boat tour is free to cancel/, 'with its reason');
+    assert.match(trail, /Agent's reason: The boat tour is free to cancel/, 'with its reason');
     assert.match(trail, /Rests on \(checked by the code\): The forecast for day 2 .* says 85% chance of rain, at or above the 70% limit you signed\. SIMULATED/, 'and what the move rests on');
     assert.match(trail, /Chose an option/);
     assert.match(trail, /Inside your limits, so it went ahead/);
@@ -112,7 +112,7 @@ test('Flow A: the agent wakes, reads the terms, quotes the sentence, finds a rea
     const itinerary = await text(page, '#itinerary-card');
     assert.doesNotMatch(itinerary, /Sunset boat tour/);
     assert.match(itinerary, /Electricity Museum[\s\S]*real place/);
-    assert.match(itinerary, /Budget set aside at the price of what it replaces/, 'a price that was not looked up says so');
+    assert.match(itinerary, /Held \$180\.00, the same as the tour it replaces, so your plan total stays the same\./, 'a natural explanation without the disclaimer');
     assert.equal(app.fake.refs.size, refundsBefore + 1, 'one real PayPal refund');
     assert.match(await text(page, '.authority'), /Cancel or refund: \$30\.00 left of \$210\.00/);
     assert.match(trail, /Agent's note to you: I swapped the boat tour for a museum visit because of the storm./, 'its own words are shown, labelled as its words');

@@ -2,6 +2,20 @@
 // cannot smuggle an extra field past the code that reads the arguments.
 export function validate(schema, v, path = 'arguments') {
   const errs = [];
+  if (!schema) return errs;
+  if (Array.isArray(schema.type)) {
+    const ok = schema.type.some((t) => {
+      if (t === 'object') return v !== null && typeof v === 'object' && !Array.isArray(v);
+      if (t === 'array') return Array.isArray(v);
+      if (t === 'integer') return Number.isInteger(v);
+      if (t === 'number') return typeof v === 'number' && Number.isFinite(v);
+      if (t === 'string') return typeof v === 'string';
+      if (t === 'boolean') return typeof v === 'boolean';
+      return false;
+    });
+    if (!ok) errs.push(`${path} must be one of ${schema.type.join(', ')}`);
+    return errs;
+  }
   if (schema.type === 'object') {
     if (v === null || typeof v !== 'object' || Array.isArray(v)) return [`${path} must be an object`];
     for (const r of schema.required ?? []) if (!(r in v) || v[r] === undefined) errs.push(`${path}.${r} is required`);
@@ -12,7 +26,7 @@ export function validate(schema, v, path = 'arguments') {
   } else if (schema.type === 'array') {
     if (!Array.isArray(v)) return [`${path} must be an array`];
     if (schema.maxItems && v.length > schema.maxItems) errs.push(`${path} may have at most ${schema.maxItems} entries`);
-    v.forEach((x, i) => errs.push(...validate(schema.items, x, `${path}[${i}]`)));
+    if (schema.items) v.forEach((x, i) => errs.push(...validate(schema.items, x, `${path}[${i}]`)));
   } else if (schema.type === 'integer') {
     if (!Number.isInteger(v)) errs.push(`${path} must be a whole number`);
   } else if (schema.type === 'number') {
