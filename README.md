@@ -131,14 +131,12 @@ test/                node:test suites
 
 ## Sponsor tool: AG Grid
 
-The trip view renders its tables with **AG Grid Community 32.3.3**, loaded from jsDelivr (`public/index.html`, lines 9-10 and 25) with the Quartz theme. One grid container is rebuilt per tab with `agGrid.createGrid` (`public/app.js`, lines 584 and 614):
+The trip view renders its tables with **AG Grid Community 32.3.3**, loaded from jsDelivr (`public/index.html`, lines 9-10 and 25) with the Quartz theme. The grids are created with `agGrid.createGrid` in `public/app.js` (lines 584 and 614):
 
-- **Budget by item**: day, item, planned amount, status, held, paid and refunded for every item, including removed ones;
-- **PayPal activity**: action, item, amount, PayPal status, PayPal ID and time for every PayPal operation. This is the table that "Verify against PayPal" reconciles against PayPal's own records;
-- **Money set aside**: the same columns without the PayPal ID, for the internal holds.
+- the itemized budget: planned, held, paid and refunded for every item, plus each traveler's share;
+- the PayPal activity table that "Verify against PayPal" reconciles against PayPal's own records.
 
-Sorting and column resizing are on, and the rows refresh whenever the agent changes the plan. AG Charts and AG Studio are not used.
-
+Sorting and column resizing are on; rows refresh whenever the agent changes the plan. AG Charts and AG Studio are not used.
 
 ## Run it yourself
 
