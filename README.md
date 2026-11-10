@@ -20,7 +20,7 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). All
 | **Models read, code guards** | The model reads your cancellation terms into a structured rule and must quote the exact sentence; code compares the quote with your text letter for letter, checks that every date and percentage is in that sentence, and only then keeps the rule. Code, not the model, works out what a change costs you at the operator, and a change that costs you money there always waits for you. The sentence is shown on screen. |
 | **Work trail** | What the agent looked up, what it saw, which options it tried, why it chose, whether it was inside your limits, and PayPal's check afterwards (`public/app.js`). |
 | **Webhooks** | PayPal events are believed only after PayPal itself verified the signature, and they are kept on the trip. A signed "authorization voided" for a hold the ledger shows open is recorded by code (the ledger, a banner, a button for a new hold); no model is woken for it. |
-| **Evaluation** | 24 changing scenarios, an agent loop against a one-call baseline, two models, three runs each, numbers computed by a program from raw logs (`eval/`). |
+| **Evaluation** | 24 changing scenarios, an agent loop against a one-call baseline, two models, three runs each, numbers computed by a program from raw logs (`eval/`). A second, large run: 300 generated scenarios, 600 live runs ([below](#large-scale-evaluation-300-scenarios-600-live-runs)). |
 
 ## The money: pay only for what happens
 
@@ -101,6 +101,26 @@ Full tables per scenario, the method, what was changed after looking at which re
 
 **One ground truth was changed after these tables, before any rerun.** After the second review the product rule became: a change of who is on the trip or who shares an item always waits for the traveler's OK. The ideal finish of three scenarios, S09 (Cy cannot come), S22 (a dinner for Ana and Ben only) and S28 (a fourth traveler joins), was therefore changed from "executed" to "proposed" in commit `d16f621` (2026-11-10), for a product reason and before any model was run under the rule. The tables above were run earlier and are not re-scored; the details are in [`eval/README.md`](eval/README.md#what-was-run-in-order-and-what-was-changed-after-which-result).
 
+<!-- SWARM-EVAL:BEGIN -->
+## Large-scale evaluation: 300 scenarios, 600 live runs
+
+The 24 scenarios above are hand-written. For scale, 300 more were generated in six categories, 50 each (weather, closure, dropout, price, malicious, question), with `eval/generate_swarm.mjs`. Each has a ground truth taken from the operators' terms and a reference answer that passes its own checks (300 of 300). Every scenario ran twice against the live agent, once as the **agent loop** and once as the **one-call baseline** with the same facts and the same guards: 600 runs. The numbers below are copied by `eval/readme_swarm_block.mjs` from `eval/results/swarm_eval/summary.json`, which `eval/swarm_summary.mjs` computes from the raw run logs.
+
+| | Agent loop | One-call baseline |
+|---|---|---|
+| Pass rate (one format retry for both) | 72.3% (217 of 300) | 53.7% (161 of 300) |
+| Better in a paired comparison of 300 scenarios | 57 | 1 (242 ties) |
+| Money moved without the traveler's consent | $0.00 | $0.00 |
+| Unnecessary charges or refunds actually executed | $0.00 | $0.00 |
+| Overreaction, in 119 scenarios where nothing should change | 4 (3.4%) | 0% |
+
+The baseline's 139 failures are not format errors (0); all 139 are judgment or guard errors. Without the format retry the numbers are the same. Of the proposals that were confirmed and then executed, 39 of 39 showed exactly the money effect PayPal executed afterwards.
+
+**Where the agent does worse.** All 4 overreactions are in the malicious category: the reference answer was "no change", the agent asked the traveler instead because the forecast really did contain a storm, and moved $0.00.
+
+**One scoring rule was fixed before these numbers.** An earlier rule counted 12 proposals that were never executed as refunds ($370.00). A proposal that waits for the traveler moves no money, so the rule was wrong; the old figure stays in the summary file.
+<!-- SWARM-EVAL:END -->
+
 ## Seen working on the live site (PayPal sandbox)
 
 Real Chrome, the real PayPal sandbox window, the deployed Worker, the real models, the real forecast and place services:
@@ -128,6 +148,17 @@ src/paypal.js        PayPal REST client (Orders v2, Payments v2, webhook verific
 eval/                the evaluation: scenarios, one-call baseline, scoring, report, raw records
 test/                node:test suites
 ```
+
+## Sponsor tool: AG Grid
+
+The trip view renders its tables with **AG Grid Community 32.3.3**, loaded from jsDelivr (`public/index.html`, lines 9-10 and 25) with the Quartz theme. One grid container is rebuilt per tab with `agGrid.createGrid` (`public/app.js`, lines 584 and 614):
+
+- **Budget by item**: day, item, planned amount, status, held, paid and refunded for every item, including removed ones;
+- **PayPal activity**: action, item, amount, PayPal status, PayPal ID and time for every PayPal operation. This is the table that "Verify against PayPal" reconciles against PayPal's own records;
+- **Money set aside**: the same columns without the PayPal ID, for the internal holds.
+
+Sorting and column resizing are on, and the rows refresh whenever the agent changes the plan. AG Charts and AG Studio are not used.
+
 
 ## Run it yourself
 
