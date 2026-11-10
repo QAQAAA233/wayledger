@@ -129,6 +129,15 @@ eval/                the evaluation: scenarios, one-call baseline, scoring, repo
 test/                node:test suites
 ```
 
+## Sponsor tool: AG Grid
+
+The trip view renders its tables with **AG Grid Community 32.3.3**, loaded from jsDelivr (`public/index.html`, lines 9-10 and 25) with the Quartz theme. The grids are created with `agGrid.createGrid` in `public/app.js` (lines 584 and 614):
+
+- the itemized budget: planned, held, paid and refunded for every item, plus each traveler's share;
+- the PayPal activity table that "Verify against PayPal" reconciles against PayPal's own records.
+
+Sorting and column resizing are on; rows refresh whenever the agent changes the plan. AG Charts and AG Studio are not used.
+
 ## Run it yourself
 
 Requirements: Node 20+, a Cloudflare account on the Workers Paid plan (Workers AI, Durable Objects), a PayPal developer account (free sandbox).
