@@ -359,7 +359,11 @@ export function createEngine({ store, paypal, ai, now = () => Date.now(), ttlMs 
       confirmation: p.confirmation ? { by: p.confirmation.by, at: p.confirmation.at } : null,
       lines: p.actions.map((a) => ({ type: a.type, text: describeAction(a), cents: a.cents })),
       effectText: describeEffect(p.actions),
-      ...(p.authority ? { basisText: describeAuthority(p.authority) } : {}),
+      ...(p.authority ? {
+        authority: !owner && p.authority.source === 'traveler' ? { ...p.authority, quote: null } : p.authority,
+        basisText: !owner && p.authority.source === 'traveler' ? 'The traveler requested this change.' : describeAuthority(p.authority),
+      } : {}),
+      ...(p.operatorLoss ? { operatorLoss: owner ? p.operatorLoss : p.operatorLoss.map((loss) => ({ ...loss, quote: null })) } : {}),
       mostCanMoveCents: paypalEffect(p.actions).mostCanMoveCents,
       failed: p.status === 'failed',
     };

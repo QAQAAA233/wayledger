@@ -51,7 +51,11 @@ export function createTripObject({ storage: raw, env, deps = {} }) {
       return {
         ...rest,
         text: rest.text ? 'A message from the traveler.' : rest.text,
-        events: rest.events.map(({ quote, ...e }) => (e.kind === 'wake' && rest.trigger === 'message' ? { ...e, detail: 'A message from the traveler.' } : e)),
+        events: rest.events.map(({ quote, ...e }) => ({
+          ...e,
+          ...(e.kind === 'wake' && rest.trigger === 'message' ? { detail: 'A message from the traveler.' } : {}),
+          ...(e.authority?.source === 'traveler' ? { authority: { ...e.authority, quote: null }, basis: 'The traveler requested this change.' } : {}),
+        })),
       };
     });
     if (method === 'webhook') {
