@@ -124,7 +124,9 @@ export function createPayPal({ clientId, secret, base = 'https://api-m.sandbox.p
     // Follows a link PayPal put in an event (for example a refund's link up to its charge). Only PayPal's own payments API.
     async getByLink(href) {
       const url = new URL(href);
-      if (!href.startsWith(`${base.replace('api-m.', 'api.')}/v2/payments/`) && !href.startsWith(`${base}/v2/payments/`)) throw new PayPalError('That link is not a PayPal payments link.');
+      // Validate the parsed path: URL normalization can move a raw /v2/payments/../ link outside payments.
+      const origins = [new URL(base).origin, new URL(base.replace('api-m.', 'api.')).origin];
+      if (!origins.includes(url.origin) || url.username || url.password || !url.pathname.startsWith('/v2/payments/')) throw new PayPalError('That link is not a PayPal payments link.');
       return call('GET', url.pathname);
     },
 
