@@ -407,7 +407,14 @@ test('cancelling something the terms make non-refundable always needs the person
   assert.deepEqual(costly.mandate.reasons.map((r) => r.code), ['LOSS_TO_OPERATOR']);
   assert.deepEqual(active(ctx).operatorLoss, [{ title: 'Sintra day trip', lossCents: 12000, why: 'the terms say it is non-refundable', quote: sentence }]);
   assert.equal(state(ctx).plan.items.some((i) => i.id === sintra), true, 'nothing happened yet');
-  assert.equal(ctx.engine.view(state(ctx)).proposal.operatorLoss[0].quote, sentence, 'the screen gets the sentence');
+  const ownerView = ctx.engine.view(state(ctx), { owner: true });
+  assert.equal(ownerView.owner, true);
+  assert.equal(ownerView.proposal.operatorLoss[0].quote, sentence, 'the owner sees the sentence before confirming');
+  const sharedView = ctx.engine.view(state(ctx));
+  assert.equal(sharedView.owner, false);
+  assert.deepEqual(sharedView.proposal.operatorLoss[0], { ...ownerView.proposal.operatorLoss[0], quote: null }, 'sharing preserves the cost and reason, not the private sentence');
+  assert.equal(JSON.stringify(sharedView).includes(sentence), false, 'the private sentence cannot leak through another shared field');
+  assert.equal(active(ctx).operatorLoss[0].quote, sentence, 'redaction does not alter the stored confirmation evidence');
 
   const free = await ctx.engine.submitEdit({ ops: [{ op: 'remove', itemId: boat }] });
   assert.equal(free.outcome, 'executed', 'free to cancel and inside the limits: the agent goes ahead on its own');
